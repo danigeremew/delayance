@@ -1,0 +1,36 @@
+{
+  "name": "@delayance/worker",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/main.ts",
+    "start": "node dist/main.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src --max-warnings 0",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.826.0",
+    "@delayance/document-model": "workspace:*",
+    "@delayance/docx-engine": "workspace:*",
+    "@delayance/validation": "workspace:*",
+    "bullmq": "^5.53.2",
+    "dotenv": "^16.5.0",
+    "drizzle-orm": "^0.44.2",
+    "ioredis": "^5.6.1",
+    "pg": "^8.16.0",
+    "pdf-parse": "^1.1.1",
+    "playwright": "^1.52.0"
+  },
+  "devDependencies": {
+    "@delayance/eslint-config": "workspace:*",
+    "@delayance/typescript-config": "workspace:*",
+    "@types/node": "^22.15.30",
+    "@types/pg": "^8.15.4",
+    "eslint": "^9.28.0",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.3"
+  }
+}

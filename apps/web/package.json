@@ -1,0 +1,50 @@
+{
+  "name": "@delayance/web",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --port 3000",
+    "build": "next build",
+    "start": "next start --port 3000",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint . --max-warnings 0",
+    "test": "vitest run --passWithNoTests",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "@delayance/design-system": "workspace:*",
+    "@delayance/document-engine": "workspace:*",
+    "@delayance/document-model": "workspace:*",
+    "@delayance/editor-schema": "workspace:*",
+    "@tiptap/core": "^3.28.0",
+    "@tiptap/extension-placeholder": "^3.28.0",
+    "@tiptap/extension-table": "^3.28.0",
+    "@tiptap/extension-table-cell": "^3.28.0",
+    "@tiptap/extension-table-header": "^3.28.0",
+    "@tiptap/extension-table-row": "^3.28.0",
+    "@tiptap/extension-text-align": "^3.28.0",
+    "@tiptap/extension-underline": "^3.28.0",
+    "@tiptap/pm": "^3.28.0",
+    "@tiptap/react": "^3.28.0",
+    "@tiptap/starter-kit": "^3.28.0",
+    "cmdk": "^1.1.1",
+    "jszip": "^3.10.1",
+    "next": "^15.3.3",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "zustand": "^5.0.14"
+  },
+  "devDependencies": {
+    "@delayance/eslint-config": "workspace:*",
+    "@delayance/typescript-config": "workspace:*",
+    "@playwright/test": "^1.52.0",
+    "@tailwindcss/postcss": "^4.1.8",
+    "@types/node": "^22.15.30",
+    "@types/react": "^19.1.6",
+    "@types/react-dom": "^19.1.5",
+    "eslint": "^9.28.0",
+    "tailwindcss": "^4.1.8",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.3"
+  }
+}

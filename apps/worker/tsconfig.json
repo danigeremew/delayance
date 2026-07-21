@@ -1,0 +1,10 @@
+{
+  "extends": "@delayance/typescript-config/node.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    "module": "CommonJS",
+    "moduleResolution": "Node"
+  },
+  "include": ["src"]
+}

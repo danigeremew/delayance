@@ -1,0 +1,33 @@
+{
+  "name": "@delayance/docx-engine",
+  "version": "0.0.0",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "require": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src --max-warnings 0",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@delayance/document-engine": "workspace:*",
+    "@delayance/document-model": "workspace:*",
+    "fast-xml-parser": "^5.2.5",
+    "jszip": "^3.10.1"
+  },
+  "devDependencies": {
+    "@delayance/eslint-config": "workspace:*",
+    "@delayance/typescript-config": "workspace:*",
+    "eslint": "^9.28.0",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.3"
+  }
+}
