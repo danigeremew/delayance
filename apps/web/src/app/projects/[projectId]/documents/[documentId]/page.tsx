@@ -89,6 +89,8 @@ export default function WorkspacePage() {
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loadedId = useRef<string | null>(null);
   const updating = useRef(false);
+  const aiStreaming = useRef(false);
+  const preStreamDoc = useRef<Document | null>(null);
 
   const editor = useEditor({
     immediatelyRender: false,
@@ -118,7 +120,7 @@ export default function WorkspacePage() {
       StableIds,
     ],
     onUpdate: ({ editor: ed }) => {
-      if (updating.current || !documentModel) return;
+      if (updating.current || aiStreaming.current || !documentModel) return;
       const next = pmJsonToDocument(ed.getJSON() as never, {
         id: documentModel.id,
         title: documentModel.title,
@@ -174,6 +176,64 @@ export default function WorkspacePage() {
     },
     [editor],
   );
+
+  const appendAiStreamText = useCallback(
+    (text: string) => {
+      if (!editor || editor.isDestroyed) return;
+      updating.current = true;
+      let i = 0;
+      while (i < text.length) {
+        if (text.startsWith('\n\n', i)) {
+          editor.commands.splitBlock();
+          i += 2;
+          continue;
+        }
+        if (text[i] === '\n') {
+          editor.commands.setHardBreak();
+          i += 1;
+          continue;
+        }
+        let j = i + 1;
+        while (j < text.length && text[j] !== '\n') j += 1;
+        editor.commands.insertContent(text.slice(i, j));
+        i = j;
+      }
+    },
+    [editor],
+  );
+
+  const beginAiStream = useCallback(() => {
+    if (!editor || editor.isDestroyed) return;
+    preStreamDoc.current = documentModel;
+    aiStreaming.current = true;
+    updating.current = true;
+    editor.chain().focus('end').insertContent({ type: 'paragraph' }).run();
+  }, [editor, documentModel]);
+
+  const finishAiStream = useCallback(
+    (next: Document | null) => {
+      const snapshot = preStreamDoc.current;
+      aiStreaming.current = false;
+      updating.current = false;
+      preStreamDoc.current = null;
+      if (next) {
+        syncFromModel(next);
+        setSaveStatus('saved');
+      } else if (snapshot) {
+        // Discard the live draft if the server did not apply ops
+        syncFromModel(snapshot);
+      }
+    },
+    [syncFromModel],
+  );
+
+  const abortAiStream = useCallback(() => {
+    const snapshot = preStreamDoc.current;
+    aiStreaming.current = false;
+    updating.current = false;
+    preStreamDoc.current = null;
+    if (snapshot) syncFromModel(snapshot);
+  }, [syncFromModel]);
 
   // When the editor mounts after the document fetch, push model → editor
   useEffect(() => {
@@ -453,6 +513,10 @@ export default function WorkspacePage() {
                 projectId={projectId}
                 documentId={documentId}
                 selectedNodeId={selectedNodeId}
+                onStreamStart={beginAiStream}
+                onStreamToken={appendAiStreamText}
+                onStreamFinish={finishAiStream}
+                onStreamAbort={abortAiStream}
                 onAccepted={() => {
                   void (async () => {
                     const doc = await apiFetch<{ title: string; content: Document }>(

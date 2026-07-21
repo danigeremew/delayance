@@ -127,3 +127,36 @@ export function buildMessages(
     },
   ];
 }
+
+/** Messages for streaming Write — plain markdown body, not JSON ops. */
+export function buildWriteStreamMessages(
+  instruction: string,
+  pack: ContextPack,
+): { role: 'system' | 'user'; content: string }[] {
+  const contextBlock = [
+    `Document: ${pack.title}`,
+    pack.rootSummary ?? '',
+    pack.memory.length ? `Project memory:\n${pack.memory.join('\n')}` : '',
+    pack.sources.length ? `Sources:\n${pack.sources.join('\n---\n')}` : '',
+    'Context nodes:',
+    ...pack.nodeSnippets.map(
+      (n) => `- ${n.id} (${n.type}${n.number ? ` ${n.number}` : ''}): ${n.text}`,
+    ),
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  return [
+    {
+      role: 'system',
+      content:
+        'You are a document writing assistant. Write the requested document content as clean markdown only. ' +
+        'Use # / ## headings and blank lines between paragraphs. Do not wrap in JSON or code fences. ' +
+        'Do not include commentary before or after the content.',
+    },
+    {
+      role: 'user',
+      content: `${contextBlock}\n\nWrite the following:\n${instruction}`,
+    },
+  ];
+}

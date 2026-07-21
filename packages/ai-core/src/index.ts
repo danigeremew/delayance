@@ -1,5 +1,5 @@
 export * from './types';
-export { packContext, buildMessages } from './context';
+export { packContext, buildMessages, buildWriteStreamMessages } from './context';
 export {
   parseAiProposal,
   validateAiProposal,

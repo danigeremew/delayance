@@ -1,7 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
-import { apiFetch } from '@/lib/api';
+import { apiFetch, apiFetchSse } from '@/lib/api';
+import type { Document } from '@delayance/document-model';
 
 type Mode = 'auto' | 'ask' | 'edit' | 'write' | 'review';
 
@@ -160,11 +161,21 @@ export function AiPanel({
   documentId,
   selectedNodeId,
   onAccepted,
+  onStreamStart,
+  onStreamToken,
+  onStreamFinish,
+  onStreamAbort,
 }: {
   projectId: string;
   documentId: string;
   selectedNodeId: string | null;
   onAccepted: () => void;
+  /** Called once before the first streamed token hits the editor. */
+  onStreamStart?: () => void;
+  onStreamToken?: (text: string) => void;
+  /** Final document after stream apply, or null if nothing applied. */
+  onStreamFinish?: (document: Document | null) => void;
+  onStreamAbort?: () => void;
 }) {
   const [mode, setMode] = useState<Mode>('auto');
   const [instruction, setInstruction] = useState('');
@@ -333,6 +344,13 @@ export function AiPanel({
     setError(null);
     const ac = new AbortController();
     abortRef.current = ac;
+
+    const useStream =
+      mode === 'write' ||
+      mode === 'auto' ||
+      opts?.preferredMode === 'write' ||
+      opts?.preferredMode === 'edit';
+
     try {
       let chatId = activeChatId;
       if (!chatId) {
@@ -345,9 +363,100 @@ export function AiPanel({
         setOpenTabIds((prev) => [...prev.filter((id) => id !== chat.id), chat.id]);
       }
 
-      const endpointMode = opts?.preferredMode
-        ? 'auto'
-        : mode;
+      if (useStream && (mode === 'write' || mode === 'auto' || opts?.preferredMode)) {
+        let started = false;
+        let sawError: string | null = null;
+        let finalChatId = chatId;
+        let applied = false;
+        let streamDoc: Document | null = null;
+
+        const streamMode: 'write' | 'auto' =
+          opts?.preferredMode || mode === 'auto' ? 'auto' : 'write';
+
+        await apiFetchSse(
+          `/projects/${projectId}/documents/${documentId}/ai/stream`,
+          {
+            method: 'POST',
+            body: JSON.stringify({
+              instruction: prompt,
+              nodeIds: selectedNodeId ? [selectedNodeId] : undefined,
+              chatId,
+              mode: streamMode,
+              preferredMode: opts?.preferredMode,
+            }),
+            signal: ac.signal,
+          },
+          (raw) => {
+            const event = raw as {
+              type: string;
+              text?: string;
+              message?: string;
+              proposal?: Proposal;
+              chatId?: string;
+              applied?: boolean;
+              document?: Document | null;
+              externalProviderWarning?: string | null;
+              validation?: { ok: boolean; errors: string[] };
+            };
+
+            if (event.type === 'token' && event.text) {
+              if (!started) {
+                started = true;
+                onStreamStart?.();
+              }
+              onStreamToken?.(event.text);
+              return;
+            }
+
+            if (event.type === 'clarification' && event.proposal && event.chatId) {
+              finalChatId = event.chatId;
+              setActiveChatId(event.chatId);
+              setOpenTabIds((prev) =>
+                prev.includes(event.chatId!) ? prev : [...prev, event.chatId!],
+              );
+              void loadChats();
+              void loadProposals(event.chatId);
+              return;
+            }
+
+            if (event.type === 'done') {
+              if (event.chatId) finalChatId = event.chatId;
+              applied = Boolean(event.applied);
+              streamDoc = event.document ?? null;
+              if (event.externalProviderWarning) setWarning(event.externalProviderWarning);
+              if (event.validation && !event.validation.ok) {
+                setError(
+                  event.validation.errors.join('; ') ||
+                    'AI could not produce valid document ops',
+                );
+              }
+              return;
+            }
+
+            if (event.type === 'error') {
+              sawError = event.message ?? 'Stream failed';
+            }
+          },
+        );
+
+        if (sawError) throw new Error(sawError);
+
+        if (!opts?.instruction) setInstruction('');
+        setActiveChatId(finalChatId);
+        setOpenTabIds((prev) =>
+          prev.includes(finalChatId) ? prev : [...prev, finalChatId],
+        );
+        await Promise.all([loadChats(), loadProposals(finalChatId)]);
+
+        if (started) {
+          onStreamFinish?.(applied ? streamDoc : null);
+        } else if (applied) {
+          onAccepted();
+        }
+        return;
+      }
+
+      const endpointMode = opts?.preferredMode ? 'auto' : mode;
       const body: {
         instruction: string;
         nodeIds?: string[];
@@ -385,6 +494,7 @@ export function AiPanel({
       await Promise.all([loadChats(), loadProposals(res.chatId)]);
       if (res.applied) onAccepted();
     } catch (e) {
+      onStreamAbort?.();
       if (e instanceof Error && (e.name === 'AbortError' || e.message.includes('abort'))) {
         setError('Stopped');
       } else {
@@ -660,7 +770,11 @@ export function AiPanel({
               </div>
             </div>
           ))}
-          {busy ? <p className="text-sm text-[var(--dl-muted)]">Thinking…</p> : null}
+          {busy ? (
+            <p className="text-sm text-[var(--dl-muted)]">
+              {mode === 'write' || mode === 'auto' ? 'Writing into document…' : 'Thinking…'}
+            </p>
+          ) : null}
         </div>
       )}
 

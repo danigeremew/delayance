@@ -8,9 +8,11 @@ import {
   Put,
   Query,
   Req,
+  Res,
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { z } from 'zod';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
@@ -33,6 +35,14 @@ const aiRequestSchema = z.object({
 });
 
 const autoRequestSchema = aiRequestSchema.extend({
+  preferredMode: z.enum(['edit', 'write']).optional(),
+});
+
+const streamRequestSchema = z.object({
+  instruction: z.string().min(1).max(20000),
+  nodeIds: z.array(z.string()).optional(),
+  chatId: z.string().uuid().optional(),
+  mode: z.enum(['write', 'auto']).default('write'),
   preferredMode: z.enum(['edit', 'write']).optional(),
 });
 
@@ -145,6 +155,50 @@ export class AiController {
       chatId: body.chatId,
       preferredMode: body.preferredMode,
     });
+  }
+
+  /** SSE stream for live Write typing (also used by Auto when it resolves to write). */
+  @Post('projects/:projectId/documents/:documentId/ai/stream')
+  @RequireProjectRoles('viewer')
+  async stream(
+    @Param('projectId') projectId: string,
+    @Param('documentId') documentId: string,
+    @Req() req: { user: ProjectRequestUser },
+    @Body(new ZodValidationPipe(streamRequestSchema)) body: z.infer<typeof streamRequestSchema>,
+    @Res() res: Response,
+  ) {
+    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders?.();
+
+    const writeEvent = (payload: unknown) => {
+      res.write(`data: ${JSON.stringify(payload)}\n\n`);
+    };
+
+    try {
+      for await (const event of this.ai.streamWrite({
+        projectId,
+        documentId,
+        userId: req.user.userId,
+        role: req.user.projectRole!,
+        instruction: body.instruction,
+        nodeIds: body.nodeIds,
+        chatId: body.chatId,
+        mode: body.mode,
+        preferredMode: body.preferredMode,
+      })) {
+        writeEvent(event);
+      }
+    } catch (err) {
+      writeEvent({
+        type: 'error',
+        message: err instanceof Error ? err.message : 'Stream failed',
+      });
+    } finally {
+      res.end();
+    }
   }
 
   @Post('projects/:projectId/documents/:documentId/ai/edit')

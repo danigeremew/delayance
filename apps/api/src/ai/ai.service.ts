@@ -9,10 +9,12 @@ import { applyOperation } from '@delayance/document-engine';
 import {
   buildIntentClassificationMessages,
   buildMessages,
+  buildWriteStreamMessages,
   classifyAiIntent,
   packContext,
   parseIntentClassification,
   resolveDocumentOps,
+  synthesizeWriteOpsFromText,
   validateAiProposal,
   type AiMode,
   type IntentClassification,
@@ -587,6 +589,272 @@ export class AiService {
           versionReason: `ai.proposal.accept:${input.mode}`,
         },
       );
+    }
+
+    return content;
+  }
+
+  /**
+   * Stream Write content as markdown tokens, then persist insert ops.
+   * Yields SSE-friendly event objects.
+   */
+  async *streamWrite(input: {
+    projectId: string;
+    documentId: string;
+    userId: string;
+    role: ProjectRole;
+    instruction: string;
+    nodeIds?: string[];
+    chatId?: string;
+    /** When set (from Auto), skip intent classify and use this mode. */
+    mode?: 'write' | 'auto';
+    preferredMode?: 'edit' | 'write';
+  }): AsyncGenerator<
+    | { type: 'status'; message: string }
+    | {
+        type: 'clarification';
+        proposal: unknown;
+        chatId: string;
+        clarification: 'edit_or_write';
+      }
+    | { type: 'token'; text: string }
+    | {
+        type: 'done';
+        proposal: unknown;
+        chatId: string;
+        applied: boolean;
+        resolvedMode: AiMode;
+        document: Document | null;
+        validation: { ok: boolean; errors: string[] };
+        externalProviderWarning: string | null;
+      }
+    | { type: 'error'; message: string }
+  > {
+    try {
+      let resolvedMode: AiMode = 'write';
+      const chatId = await this.resolveChatId({
+        projectId: input.projectId,
+        documentId: input.documentId,
+        userId: input.userId,
+        chatId: input.chatId,
+        instruction: input.instruction,
+      });
+
+      if (input.mode === 'auto' && !input.preferredMode) {
+        yield { type: 'status', message: 'Choosing mode…' };
+        const classification = await this.resolveIntent(
+          input.projectId,
+          input.instruction,
+        );
+        if (classification.needsClarification || !classification.mode) {
+          const [proposal] = await this.database.db
+            .insert(aiProposals)
+            .values({
+              projectId: input.projectId,
+              documentId: input.documentId,
+              chatId,
+              mode: 'auto',
+              model: 'intent',
+              provider: 'auto',
+              promptSummary: input.instruction.slice(0, 500),
+              contextNodeIds: input.nodeIds ?? [],
+              answer:
+                'Should I Edit existing document content, or Write new content?\n\n' +
+                (classification.reason ? `(${classification.reason})` : ''),
+              ops: [],
+              findings: [],
+              citedSourceIds: [],
+              status: 'pending',
+              createdBy: input.userId,
+            })
+            .returning();
+          yield {
+            type: 'clarification',
+            proposal,
+            chatId,
+            clarification: 'edit_or_write',
+          };
+          return;
+        }
+        if (classification.mode !== 'write') {
+          // Non-write modes: fall back to complete (no live typing).
+          yield { type: 'status', message: `Running ${classification.mode}…` };
+          const result = await this.executeMode({
+            ...input,
+            chatId,
+            mode: classification.mode,
+          });
+          const docRow = result.applied
+            ? await this.documents.get(input.projectId, input.documentId)
+            : null;
+          yield {
+            type: 'done',
+            proposal: result.proposal,
+            chatId: result.chatId,
+            applied: result.applied,
+            resolvedMode: classification.mode,
+            document: docRow ? asDocument(docRow.content) : null,
+            validation: result.validation,
+            externalProviderWarning: result.externalProviderWarning,
+          };
+          return;
+        }
+        resolvedMode = 'write';
+      } else if (input.preferredMode === 'edit') {
+        yield { type: 'status', message: 'Editing…' };
+        const result = await this.executeMode({
+          ...input,
+          chatId,
+          mode: 'edit',
+        });
+        const docRow = result.applied
+          ? await this.documents.get(input.projectId, input.documentId)
+          : null;
+        yield {
+          type: 'done',
+          proposal: result.proposal,
+          chatId: result.chatId,
+          applied: result.applied,
+          resolvedMode: 'edit',
+          document: docRow ? asDocument(docRow.content) : null,
+          validation: result.validation,
+          externalProviderWarning: result.externalProviderWarning,
+        };
+        return;
+      } else if (input.preferredMode === 'write') {
+        resolvedMode = 'write';
+      }
+
+      this.assertModeAllowed(input.role, 'write');
+      yield { type: 'status', message: 'Writing…' };
+
+      const docRow = await this.documents.get(input.projectId, input.documentId);
+      const content = asDocument(docRow.content);
+      const { adapter, model, provider, external } = await this.resolveProvider(
+        input.projectId,
+      );
+
+      if (!adapter.stream) {
+        // Provider cannot stream — fall back to complete write.
+        const result = await this.executeMode({
+          ...input,
+          chatId,
+          mode: 'write',
+        });
+        const next = result.applied
+          ? await this.documents.get(input.projectId, input.documentId)
+          : null;
+        yield {
+          type: 'done',
+          proposal: result.proposal,
+          chatId: result.chatId,
+          applied: result.applied,
+          resolvedMode: 'write',
+          document: next ? asDocument(next.content) : null,
+          validation: result.validation,
+          externalProviderWarning: result.externalProviderWarning,
+        };
+        return;
+      }
+
+      const memories = await this.database.db
+        .select()
+        .from(projectMemoryItems)
+        .where(eq(projectMemoryItems.projectId, input.projectId));
+      const sources = await this.database.db
+        .select()
+        .from(projectSources)
+        .where(
+          and(
+            eq(projectSources.projectId, input.projectId),
+            eq(projectSources.aiMayUse, true),
+            eq(projectSources.outdated, false),
+          ),
+        );
+
+      const pack = packContext({
+        document: content,
+        memoryItems: memories.map((m) => ({ kind: m.kind, content: m.body })),
+        sourceTexts: sources.map((s) => ({
+          id: s.id,
+          title: s.title,
+          text: s.textContent,
+        })),
+        nodeIds: input.nodeIds,
+        maxNodes: 12,
+      });
+
+      const messages = buildWriteStreamMessages(input.instruction, pack);
+      let fullText = '';
+      for await (const chunk of adapter.stream(messages, {
+        model,
+        temperature: 0.4,
+        maxTokens: 4096,
+      })) {
+        fullText += chunk;
+        yield { type: 'token', text: chunk };
+      }
+
+      const ops = synthesizeWriteOpsFromText(fullText);
+      const validated = resolveDocumentOps(
+        { answer: fullText.slice(0, 400), ops },
+        content,
+        input.role,
+        'write',
+        input.instruction,
+      );
+
+      const shouldAutoApply = validated.ok && validated.ops.length > 0;
+      const [proposal] = await this.database.db
+        .insert(aiProposals)
+        .values({
+          projectId: input.projectId,
+          documentId: input.documentId,
+          chatId,
+          mode: resolvedMode,
+          model,
+          provider,
+          promptSummary: input.instruction.slice(0, 500),
+          contextNodeIds: pack.contextNodeIds,
+          answer: fullText.slice(0, 2000) || validated.payload?.answer || null,
+          ops: validated.ops,
+          findings: [],
+          citedSourceIds: [],
+          status: shouldAutoApply ? 'accepted' : 'pending',
+          createdBy: input.userId,
+        })
+        .returning();
+
+      let nextDoc: Document | null = null;
+      if (shouldAutoApply) {
+        nextDoc = await this.applyProposalOps({
+          projectId: input.projectId,
+          documentId: input.documentId,
+          userId: input.userId,
+          role: input.role,
+          ops: validated.ops,
+          findings: [],
+          mode: 'write',
+        });
+      }
+
+      yield {
+        type: 'done',
+        proposal,
+        chatId,
+        applied: shouldAutoApply,
+        resolvedMode: 'write',
+        document: nextDoc,
+        validation: { ok: validated.ok, errors: validated.errors },
+        externalProviderWarning: external
+          ? 'Document content may be sent to an external AI provider'
+          : null,
+      };
+    } catch (err) {
+      yield {
+        type: 'error',
+        message: err instanceof Error ? err.message : 'Stream failed',
+      };
     }
   }
 
