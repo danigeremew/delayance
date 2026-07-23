@@ -2,7 +2,7 @@
 /**
  * Live acceptance smoke against running API (+ worker for jobs).
  */
-const API = process.env.PLAYWRIGHT_API_URL || 'http://localhost:3001';
+const API = process.env.PLAYWRIGHT_API_URL || 'http://localhost:48722';
 
 async function req(path, { method = 'GET', token, body } = {}) {
   const res = await fetch(`${API}${path}`, {

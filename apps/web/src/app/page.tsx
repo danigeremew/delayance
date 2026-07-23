@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { getAccessToken } from '@/lib/api';
 import { ThemeSwitcher } from '@/components/theme-switcher';
 
-const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
+const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:48722';
 
 export default function HomePage() {
   const router = useRouter();

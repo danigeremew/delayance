@@ -11,7 +11,7 @@ Delayance is an AI Document Workspace built as a modular monolith in a **pnpm + 
 ### Applications (`apps/`)
 
 - **`apps/web`**: Next.js frontend UI (React, TailwindCSS, Tiptap editor integration).
-- **`apps/api`**: NestJS REST API and OpenAPI/Swagger docs (`http://localhost:3001/docs`).
+- **`apps/api`**: NestJS REST API and OpenAPI/Swagger docs (`http://localhost:48722/docs`).
 - **`apps/worker`**: BullMQ background worker for asynchronous jobs (e.g., DOCX/PDF export, embedding generation).
 - **`apps/collaboration`**: Placeholder for real-time document editing (Yjs / WebSockets).
 
@@ -57,9 +57,9 @@ Delayance is an AI Document Workspace built as a modular monolith in a **pnpm + 
 
 Services run via Docker Compose in `infra/`:
 
-- **PostgreSQL (+ pgvector, JSONB)**: Host port `5433` (DB: `delayance`)
-- **Redis**: Host port `6380` (BullMQ queues, rate limiting)
-- **MinIO (S3-compatible)**: Host API port `9002`, Console port `9003` (Bucket: `delayance-files`)
+- **PostgreSQL (+ pgvector, JSONB)**: Host port `58433` (DB: `delayance`)
+- **Redis**: Host port `64380` (BullMQ queues, rate limiting)
+- **MinIO (S3-compatible)**: Host API port `59002`, Console port `59003` (Bucket: `delayance-files`)
 
 ---
 

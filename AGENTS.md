@@ -7,7 +7,7 @@
 Delayance is an AI Document Workspace built as a modular monolith in a **pnpm + Turborepo** monorepo (Node.js >= 22).
 
 - **`apps/web`**: Next.js frontend UI (React, TailwindCSS, Tiptap editor).
-- **`apps/api`**: NestJS REST API and OpenAPI/Swagger docs (`http://localhost:3001/docs`).
+- **`apps/api`**: NestJS REST API and OpenAPI/Swagger docs (`http://localhost:48722/docs`).
 - **`apps/worker`**: BullMQ background worker for export and asynchronous jobs.
 - **`apps/collaboration`**: Placeholder for real-time collaboration.
 - **`packages/document-model`**: Canonical structured document schema & stable IDs.

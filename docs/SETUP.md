@@ -51,12 +51,12 @@ Uses Playwright. Set `PLAYWRIGHT_API_URL` / `PLAYWRIGHT_BASE_URL` if ports diffe
 
 | Service | URL |
 | --- | --- |
-| Web | http://localhost:3000 |
-| API | http://localhost:3001 |
-| API docs (Swagger) | http://localhost:3001/docs |
-| MinIO console | http://localhost:9003 |
+| Web | http://localhost:48721 |
+| API | http://localhost:48722 |
+| API docs (Swagger) | http://localhost:48722/docs |
+| MinIO console | http://localhost:59003 |
 
-Postgres is exposed on host port **5433**, Redis on **6380**, MinIO on **9002/9003** to avoid conflicts with local services.
+Postgres is exposed on host port **58433**, Redis on **64380**, MinIO on **59002/59003** to avoid conflicts with local services.
 
 ## AI providers
 

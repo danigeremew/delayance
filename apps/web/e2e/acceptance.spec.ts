@@ -1,7 +1,7 @@
 import { test, expect, request } from '@playwright/test';
 import JSZip from 'jszip';
 
-const API = process.env.PLAYWRIGHT_API_URL ?? 'http://localhost:3001';
+const API = process.env.PLAYWRIGHT_API_URL ?? 'http://localhost:48722';
 
 test.describe('§42 acceptance (API)', () => {
   test('register → project → document → save → export markdown/docx → source search', async () => {

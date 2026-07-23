@@ -7,7 +7,7 @@ services:
       POSTGRES_PASSWORD: delayance
       POSTGRES_DB: delayance
     ports:
-      - '5433:5432'
+      - '58433:5432'
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
@@ -21,7 +21,7 @@ services:
     image: redis:7-alpine
     container_name: delayance-redis
     ports:
-      - '6380:6379'
+      - '64380:6379'
     volumes:
       - redis_data:/data
     healthcheck:
@@ -38,8 +38,8 @@ services:
       MINIO_ROOT_USER: delayance
       MINIO_ROOT_PASSWORD: delayance-secret
     ports:
-      - '9002:9000'
-      - '9003:9001'
+      - '59002:9000'
+      - '59003:9001'
     volumes:
       - minio_data:/data
     healthcheck:

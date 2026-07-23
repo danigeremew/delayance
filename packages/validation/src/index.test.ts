@@ -13,7 +13,7 @@ describe('envSchema', () => {
       MINIO_ACCESS_KEY: 'key',
       MINIO_SECRET_KEY: 'secret',
     });
-    expect(result.API_PORT).toBe(3001);
+    expect(result.API_PORT).toBe(48722);
   });
 });
 
