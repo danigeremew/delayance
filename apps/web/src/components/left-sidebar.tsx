@@ -95,10 +95,12 @@ const TAB_ICONS: Record<LeftTab, ReactNode> = {
 export function LeftSidebarShell({
   leftTab,
   onTabChange,
+  onCollapse,
   children,
 }: {
   leftTab: LeftTab;
   onTabChange: (tab: LeftTab) => void;
+  onCollapse?: () => void;
   children: ReactNode;
 }) {
   const active = LEFT_TABS.find((t) => t.id === leftTab) ?? LEFT_TABS[0]!;
@@ -127,6 +129,35 @@ export function LeftSidebarShell({
       <div className="dl-tools-panel">
         <div className="dl-tools-panel-header">
           <h2 className="dl-tools-panel-title">{active.label}</h2>
+          {onCollapse ? (
+            <button
+              type="button"
+              className="dl-sidebar-toggle-btn"
+              title="Hide tools panel"
+              aria-label="Hide tools panel"
+              onClick={onCollapse}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <rect
+                  x="3.5"
+                  y="4.5"
+                  width="17"
+                  height="15"
+                  rx="1.5"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                />
+                <path d="M9 4.5v15" stroke="currentColor" strokeWidth="1.6" />
+                <path
+                  d="M6.2 9.5l-1.7 2.5 1.7 2.5"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+          ) : null}
         </div>
         <div className="dl-tools-panel-body">{children}</div>
       </div>

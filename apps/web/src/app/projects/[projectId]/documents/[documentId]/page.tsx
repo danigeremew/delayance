@@ -8,6 +8,7 @@ import StarterKit from '@tiptap/starter-kit';
 import Underline from '@tiptap/extension-underline';
 import Placeholder from '@tiptap/extension-placeholder';
 import TextAlign from '@tiptap/extension-text-align';
+import { TextStyle, FontFamily, FontSize } from '@tiptap/extension-text-style';
 import { Table } from '@tiptap/extension-table';
 import { TableRow } from '@tiptap/extension-table-row';
 import { TableCell } from '@tiptap/extension-table-cell';
@@ -17,7 +18,7 @@ import {
   type DocumentOperation,
   type NumberingMap,
 } from '@delayance/document-engine';
-import type { Document, DocNode } from '@delayance/document-model';
+import type { Document } from '@delayance/document-model';
 import { generateNodeId } from '@delayance/document-model';
 import { documentToPmJson, pmJsonToDocument } from '@delayance/editor-schema';
 import { apiFetch, getAccessToken } from '@/lib/api';
@@ -47,6 +48,9 @@ import {
 import { StableIds } from '@/components/stable-ids';
 import { EditorToolbar } from '@/components/editor-toolbar';
 import { EditorMenubar } from '@/components/editor-menubar';
+import { PrintPageGaps } from '@/components/print-page-gaps';
+import { markdownToTiptapBlocks, WordStreamTyper } from '@/lib/markdown-stream';
+import type { JSONContent } from '@tiptap/core';
 
 interface CommentRow {
   id: string;
@@ -91,6 +95,8 @@ export default function WorkspacePage() {
   const updating = useRef(false);
   const aiStreaming = useRef(false);
   const preStreamDoc = useRef<Document | null>(null);
+  const preStreamJson = useRef<JSONContent | null>(null);
+  const streamTyper = useRef<WordStreamTyper | null>(null);
 
   const editor = useEditor({
     immediatelyRender: false,
@@ -99,6 +105,9 @@ export default function WorkspacePage() {
         heading: { levels: [1, 2, 3, 4, 5, 6] },
       }),
       Underline,
+      TextStyle,
+      FontFamily,
+      FontSize,
       TextAlign.configure({
         types: ['heading', 'paragraph'],
       }),
@@ -118,6 +127,7 @@ export default function WorkspacePage() {
       Citation,
       Footnote,
       StableIds,
+      PrintPageGaps,
     ],
     onUpdate: ({ editor: ed }) => {
       if (updating.current || aiStreaming.current || !documentModel) return;
@@ -177,61 +187,78 @@ export default function WorkspacePage() {
     [editor],
   );
 
-  const appendAiStreamText = useCallback(
-    (text: string) => {
-      if (!editor || editor.isDestroyed) return;
+  const renderStreamMarkdown = useCallback(
+    (markdown: string) => {
+      if (!editor || editor.isDestroyed || !preStreamJson.current) return;
       updating.current = true;
-      let i = 0;
-      while (i < text.length) {
-        if (text.startsWith('\n\n', i)) {
-          editor.commands.splitBlock();
-          i += 2;
-          continue;
-        }
-        if (text[i] === '\n') {
-          editor.commands.setHardBreak();
-          i += 1;
-          continue;
-        }
-        let j = i + 1;
-        while (j < text.length && text[j] !== '\n') j += 1;
-        editor.commands.insertContent(text.slice(i, j));
-        i = j;
-      }
+      const base = structuredClone(preStreamJson.current) as JSONContent;
+      const draftBlocks = markdownToTiptapBlocks(markdown);
+      const existing = Array.isArray(base.content) ? base.content : [];
+      base.content = [
+        ...existing,
+        {
+          type: 'section',
+          attrs: { id: 'ai-stream-draft' },
+          content: draftBlocks,
+        },
+      ];
+      editor.commands.setContent(base, { emitUpdate: false });
+      // Keep caret near the end of the live draft
+      editor.commands.focus('end');
     },
     [editor],
+  );
+
+  const appendAiStreamText = useCallback(
+    (text: string) => {
+      streamTyper.current?.push(text);
+    },
+    [],
   );
 
   const beginAiStream = useCallback(() => {
     if (!editor || editor.isDestroyed) return;
     preStreamDoc.current = documentModel;
+    preStreamJson.current = editor.getJSON();
     aiStreaming.current = true;
     updating.current = true;
-    editor.chain().focus('end').insertContent({ type: 'paragraph' }).run();
-  }, [editor, documentModel]);
+    streamTyper.current?.destroy();
+    streamTyper.current = new WordStreamTyper((full) => {
+      renderStreamMarkdown(full);
+    }, 28);
+  }, [editor, documentModel, renderStreamMarkdown]);
 
   const finishAiStream = useCallback(
     (next: Document | null) => {
+      const typer = streamTyper.current;
       const snapshot = preStreamDoc.current;
-      aiStreaming.current = false;
-      updating.current = false;
-      preStreamDoc.current = null;
-      if (next) {
-        syncFromModel(next);
-        setSaveStatus('saved');
-      } else if (snapshot) {
-        // Discard the live draft if the server did not apply ops
-        syncFromModel(snapshot);
-      }
+      void (async () => {
+        if (typer) await typer.flush();
+        typer?.destroy();
+        if (streamTyper.current === typer) streamTyper.current = null;
+        aiStreaming.current = false;
+        updating.current = false;
+        preStreamDoc.current = null;
+        preStreamJson.current = null;
+        if (next) {
+          syncFromModel(next);
+          setSaveStatus('saved');
+        } else if (snapshot) {
+          syncFromModel(snapshot);
+        }
+      })();
     },
     [syncFromModel],
   );
 
   const abortAiStream = useCallback(() => {
+    streamTyper.current?.destroy();
+    streamTyper.current = null;
     const snapshot = preStreamDoc.current;
     aiStreaming.current = false;
     updating.current = false;
     preStreamDoc.current = null;
+    preStreamJson.current = null;
     if (snapshot) syncFromModel(snapshot);
   }, [syncFromModel]);
 
@@ -385,7 +412,11 @@ export default function WorkspacePage() {
             className="relative flex shrink-0 flex-col border-r border-[var(--dl-border)] bg-[var(--dl-panel)]"
             style={{ width: leftWidth }}
           >
-            <LeftSidebarShell leftTab={leftTab} onTabChange={setLeftTab}>
+            <LeftSidebarShell
+              leftTab={leftTab}
+              onTabChange={setLeftTab}
+              onCollapse={() => setLeftOpen(false)}
+            >
               {leftTab === 'documents' ? (
                 <DocumentsList projectId={projectId} documentId={documentId} docs={docs} />
               ) : null}
@@ -453,7 +484,37 @@ export default function WorkspacePage() {
             </LeftSidebarShell>
             <SidebarResizeHandle side="left" onResize={setLeftWidth} />
           </aside>
-        ) : null}
+        ) : (
+          <div className="dl-sidebar-edge dl-sidebar-edge-left" aria-label="Tools panel">
+            <button
+              type="button"
+              className="dl-sidebar-toggle-btn"
+              title="Show tools panel"
+              aria-label="Show tools panel"
+              onClick={() => setLeftOpen(true)}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <rect
+                  x="3.5"
+                  y="4.5"
+                  width="17"
+                  height="15"
+                  rx="1.5"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                />
+                <path d="M9 4.5v15" stroke="currentColor" strokeWidth="1.6" />
+                <path
+                  d="M6.2 9.5l1.7 2.5-1.7 2.5"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+          </div>
+        )}
 
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
           {!documentModel ? (
@@ -490,9 +551,6 @@ export default function WorkspacePage() {
                   >
                     <EditorContent editor={editor} className="prose-doc" />
                   </div>
-                  <div className="mx-auto max-w-3xl px-4 pb-8">
-                    <NumberingLegend numbering={numbering} document={documentModel} />
-                  </div>
                 </div>
               </div>
             </>
@@ -501,35 +559,61 @@ export default function WorkspacePage() {
 
         {rightOpen ? (
           <aside
-            className="relative flex shrink-0 flex-col border-l border-[var(--dl-border)] bg-[var(--dl-panel)]"
+            className="dl-ai-sidebar relative flex shrink-0 flex-col border-l border-[var(--dl-border)] bg-[var(--dl-panel)]"
             style={{ width: rightWidth }}
           >
             <SidebarResizeHandle side="right" onResize={setRightWidth} />
-            <div className="flex items-center border-b border-[var(--dl-border)] px-3 py-2.5 text-sm font-medium">
-              AI
-            </div>
-            <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-3.5">
-              <AiPanel
-                projectId={projectId}
-                documentId={documentId}
-                selectedNodeId={selectedNodeId}
-                onStreamStart={beginAiStream}
-                onStreamToken={appendAiStreamText}
-                onStreamFinish={finishAiStream}
-                onStreamAbort={abortAiStream}
-                onAccepted={() => {
-                  void (async () => {
-                    const doc = await apiFetch<{ title: string; content: Document }>(
-                      `/projects/${projectId}/documents/${documentId}`,
-                    );
-                    setDocMeta({ title: doc.title });
-                    syncFromModel(doc.content);
-                  })();
-                }}
-              />
-            </div>
+            <AiPanel
+              projectId={projectId}
+              documentId={documentId}
+              selectedNodeId={selectedNodeId}
+              onCollapse={() => setRightOpen(false)}
+              onStreamStart={beginAiStream}
+              onStreamToken={appendAiStreamText}
+              onStreamFinish={finishAiStream}
+              onStreamAbort={abortAiStream}
+              onAccepted={() => {
+                void (async () => {
+                  const doc = await apiFetch<{ title: string; content: Document }>(
+                    `/projects/${projectId}/documents/${documentId}`,
+                  );
+                  setDocMeta({ title: doc.title });
+                  syncFromModel(doc.content);
+                })();
+              }}
+            />
           </aside>
-        ) : null}
+        ) : (
+          <div className="dl-sidebar-edge dl-sidebar-edge-right" aria-label="AI panel">
+            <button
+              type="button"
+              className="dl-sidebar-toggle-btn"
+              title="Show AI panel"
+              aria-label="Show AI panel"
+              onClick={() => setRightOpen(true)}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <rect
+                  x="3.5"
+                  y="4.5"
+                  width="17"
+                  height="15"
+                  rx="1.5"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                />
+                <path d="M15 4.5v15" stroke="currentColor" strokeWidth="1.6" />
+                <path
+                  d="M17.8 9.5l-1.7 2.5 1.7 2.5"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+          </div>
+        )}
       </div>
 
       <CommandPalette
@@ -561,36 +645,6 @@ export default function WorkspacePage() {
           }
         }}
       />
-    </div>
-  );
-}
-
-function NumberingLegend({
-  numbering,
-  document,
-}: {
-  numbering: NumberingMap;
-  document: Document;
-}) {
-  const headings: { id: string; label: string }[] = [];
-  const walk = (nodes: DocNode[]) => {
-    for (const n of nodes) {
-      if (n.type === 'heading' && numbering[n.id]) {
-        headings.push({ id: n.id, label: numbering[n.id]!.label });
-      }
-      if (n.type === 'section' || n.type === 'appendix') walk(n.children);
-    }
-  };
-  walk(document.children);
-  if (!headings.length) return null;
-  return (
-    <div className="mb-8 px-2 text-sm text-[var(--dl-muted)]">
-      <p className="mb-1 font-medium">Numbering (document engine)</p>
-      <ul>
-        {headings.map((h) => (
-          <li key={h.id}>{h.label}</li>
-        ))}
-      </ul>
     </div>
   );
 }

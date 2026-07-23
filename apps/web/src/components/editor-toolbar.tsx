@@ -14,6 +14,20 @@ interface EditorToolbarProps {
   onToggleComments?: () => void;
 }
 
+const FONT_FAMILIES = [
+  { label: 'Default', value: '' },
+  { label: 'Arial', value: 'Arial, Helvetica, sans-serif' },
+  { label: 'Times New Roman', value: '"Times New Roman", Times, serif' },
+  { label: 'Georgia', value: 'Georgia, serif' },
+  { label: 'Verdana', value: 'Verdana, Geneva, sans-serif' },
+  { label: 'Courier New', value: '"Courier New", Courier, monospace' },
+  { label: 'Comic Sans MS', value: '"Comic Sans MS", cursive' },
+  { label: 'Trebuchet MS', value: '"Trebuchet MS", sans-serif' },
+  { label: 'Garamond', value: 'Garamond, serif' },
+] as const;
+
+const FONT_SIZES = ['8', '9', '10', '11', '12', '14', '16', '18', '20', '24', '28', '32', '36', '48', '72'] as const;
+
 export function EditorToolbar({
   editor,
   projectId,
@@ -93,6 +107,18 @@ export function EditorToolbar({
     if (editor.isActive({ textAlign: 'right' })) return 'right';
     if (editor.isActive({ textAlign: 'justify' })) return 'justify';
     return 'left';
+  })();
+
+  const currentFontFamily = (() => {
+    const value = (editor?.getAttributes('textStyle').fontFamily as string | undefined) ?? '';
+    const match = FONT_FAMILIES.find((f) => f.value === value);
+    return match?.value ?? value;
+  })();
+
+  const currentFontSize = (() => {
+    const raw = (editor?.getAttributes('textStyle').fontSize as string | undefined) ?? '';
+    const n = raw.replace(/pt$/i, '').trim();
+    return FONT_SIZES.includes(n as (typeof FONT_SIZES)[number]) ? n : n || '11';
   })();
 
   return (
@@ -177,6 +203,52 @@ export function EditorToolbar({
               ))}
             </div>
           ) : null}
+        </div>
+
+        <div className="dl-toolbar-group">
+          <label className="dl-toolbar-select dl-toolbar-font" title="Font">
+            <select
+              value={currentFontFamily}
+              aria-label="Font"
+              onChange={(e) => {
+                const next = e.target.value;
+                if (!next) {
+                  editor?.chain().focus().unsetFontFamily().run();
+                  return;
+                }
+                editor?.chain().focus().setFontFamily(next).run();
+              }}
+            >
+              {FONT_FAMILIES.map((font) => (
+                <option key={font.label} value={font.value} style={{ fontFamily: font.value || undefined }}>
+                  {font.label}
+                </option>
+              ))}
+              {currentFontFamily &&
+              !FONT_FAMILIES.some((f) => f.value === currentFontFamily) ? (
+                <option value={currentFontFamily}>{currentFontFamily}</option>
+              ) : null}
+            </select>
+          </label>
+          <label className="dl-toolbar-select dl-toolbar-fontsize" title="Font size">
+            <select
+              value={currentFontSize}
+              aria-label="Font size"
+              onChange={(e) => {
+                const next = e.target.value;
+                editor?.chain().focus().setFontSize(`${next}pt`).run();
+              }}
+            >
+              {FONT_SIZES.map((size) => (
+                <option key={size} value={size}>
+                  {size}
+                </option>
+              ))}
+              {!FONT_SIZES.includes(currentFontSize as (typeof FONT_SIZES)[number]) ? (
+                <option value={currentFontSize}>{currentFontSize}</option>
+              ) : null}
+            </select>
+          </label>
         </div>
 
         <ToolbarDivider />
@@ -334,7 +406,16 @@ export function EditorToolbar({
           </ToolIcon>
           <ToolIcon
             title="Clear formatting"
-            onClick={() => editor?.chain().focus().unsetAllMarks().clearNodes().run()}
+            onClick={() =>
+              editor
+                ?.chain()
+                .focus()
+                .unsetAllMarks()
+                .unsetFontFamily()
+                .unsetFontSize()
+                .clearNodes()
+                .run()
+            }
           >
             <IconClearFormat />
           </ToolIcon>

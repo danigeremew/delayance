@@ -92,6 +92,37 @@ function IconSend() {
   );
 }
 
+function IconHistory() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M3 12a9 9 0 1 0 3-6.7M3 4v5h5"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="M12 7v5l3 2" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function IconPlus() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function IconClose() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 function IconStop() {
   return (
     <svg width="12" height="12" viewBox="0 0 24 24" aria-hidden="true">
@@ -165,6 +196,7 @@ export function AiPanel({
   onStreamToken,
   onStreamFinish,
   onStreamAbort,
+  onCollapse,
 }: {
   projectId: string;
   documentId: string;
@@ -176,6 +208,7 @@ export function AiPanel({
   /** Final document after stream apply, or null if nothing applied. */
   onStreamFinish?: (document: Document | null) => void;
   onStreamAbort?: () => void;
+  onCollapse?: () => void;
 }) {
   const [mode, setMode] = useState<Mode>('auto');
   const [instruction, setInstruction] = useState('');
@@ -573,95 +606,118 @@ export function AiPanel({
   );
 
   return (
-    <div className="flex h-full min-h-0 flex-col text-base">
-      <div className="shrink-0 space-y-2 border-b border-[var(--dl-border)] pb-2">
-        <div className="flex items-center gap-1.5">
+    <div className="dl-ai-panel">
+      <header className="dl-ai-header">
+        <div className="dl-ai-header-title">
+          <span className="dl-ai-header-mark" aria-hidden="true" />
+          <div>
+            <h2>Assistant</h2>
+            <p>{activeMode.hint}</p>
+          </div>
+        </div>
+        <div className="dl-ai-header-actions">
           <button
             type="button"
-            className={`border px-2 py-1 text-sm ${showHistory ? 'border-[var(--dl-accent)] bg-[var(--dl-bg)]' : 'border-[var(--dl-border)]'}`}
+            className={`dl-ai-icon-btn ${showHistory ? 'is-active' : ''}`}
             onClick={() => setShowHistory((v) => !v)}
             title="Chat history"
+            aria-pressed={showHistory}
           >
-            History
+            <IconHistory />
           </button>
           <button
             type="button"
-            className="border border-[var(--dl-border)] px-2 py-1 text-sm"
+            className="dl-ai-icon-btn"
             onClick={() => void startNewChat()}
             title="New chat"
           >
-            New
+            <IconPlus />
           </button>
+          {onCollapse ? (
+            <button
+              type="button"
+              className="dl-ai-icon-btn"
+              onClick={onCollapse}
+              title="Hide AI panel"
+              aria-label="Hide AI panel"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <rect
+                  x="3.5"
+                  y="4.5"
+                  width="17"
+                  height="15"
+                  rx="1.5"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                />
+                <path d="M15 4.5v15" stroke="currentColor" strokeWidth="1.6" />
+                <path
+                  d="M17.8 9.5l1.7 2.5-1.7 2.5"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+          ) : null}
         </div>
+      </header>
 
-        {openTabs.length > 0 ? (
-          <div className="flex gap-1 overflow-x-auto pb-0.5">
-            {openTabs.map((tab) => (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => void openChat(tab.id)}
-                className={`group flex max-w-[9rem] shrink-0 items-center gap-1 border px-2 py-1 text-xs ${
-                  activeChatId === tab.id && !showHistory
-                    ? 'border-[var(--dl-accent)] bg-[var(--dl-bg)]'
-                    : 'border-[var(--dl-border)]'
-                }`}
+      {!showHistory && openTabs.length > 0 ? (
+        <div className="dl-ai-tabs" role="tablist" aria-label="Open chats">
+          {openTabs.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              aria-selected={activeChatId === tab.id}
+              onClick={() => void openChat(tab.id)}
+              className={`dl-ai-tab ${activeChatId === tab.id ? 'is-active' : ''}`}
+            >
+              <span className="dl-ai-tab-label">{tab.title}</span>
+              <span
+                role="button"
+                tabIndex={0}
+                className="dl-ai-tab-close"
+                onClick={(e) => closeTab(tab.id, e)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') closeTab(tab.id, e as never);
+                }}
+                title="Close tab"
               >
-                <span className="truncate">{tab.title}</span>
-                <span
-                  role="button"
-                  tabIndex={0}
-                  className="text-[var(--dl-muted)] opacity-60 hover:opacity-100"
-                  onClick={(e) => closeTab(tab.id, e)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') closeTab(tab.id, e as never);
-                  }}
-                  title="Close tab"
-                >
-                  ×
-                </span>
-              </button>
-            ))}
-          </div>
-        ) : null}
+                <IconClose />
+              </span>
+            </button>
+          ))}
+        </div>
+      ) : null}
 
-        {warning ? (
-          <div className="border border-amber-400 bg-amber-50 px-2 py-1 text-xs text-amber-900">
-            {warning}
-          </div>
-        ) : null}
-      </div>
+      {warning ? <div className="dl-ai-banner dl-ai-banner-warn">{warning}</div> : null}
 
       {showHistory ? (
-        <div className="min-h-0 flex-1 overflow-y-auto py-2">
-          <p className="mb-2 text-xs uppercase tracking-wide text-[var(--dl-muted)]">
-            All chats
-          </p>
+        <div className="dl-ai-history">
+          <p className="dl-ai-section-label">All chats</p>
           {chats.length === 0 ? (
-            <p className="text-sm text-[var(--dl-muted)]">No chats yet.</p>
+            <p className="dl-ai-empty-copy">No chats yet.</p>
           ) : (
-            <ul className="space-y-1">
+            <ul className="dl-ai-history-list">
               {chats.map((chat) => (
                 <li key={chat.id}>
                   <button
                     type="button"
                     onClick={() => void openChat(chat.id)}
-                    className={`flex w-full items-start gap-2 border px-2.5 py-2 text-left text-sm ${
-                      activeChatId === chat.id
-                        ? 'border-[var(--dl-accent)] bg-[var(--dl-bg)]'
-                        : 'border-[var(--dl-border)]'
-                    }`}
+                    className={`dl-ai-history-item ${activeChatId === chat.id ? 'is-active' : ''}`}
                   >
                     <div className="min-w-0 flex-1">
-                      <p className="truncate font-medium">{chat.title}</p>
-                      <p className="text-xs text-[var(--dl-muted)]">
-                        {formatChatTime(chat.updatedAt)}
-                      </p>
+                      <p className="dl-ai-history-title">{chat.title}</p>
+                      <p className="dl-ai-history-meta">{formatChatTime(chat.updatedAt)}</p>
                     </div>
                     <span
                       role="button"
                       tabIndex={0}
-                      className="shrink-0 text-xs text-[var(--dl-muted)] underline"
+                      className="dl-ai-history-archive"
                       onClick={(e) => void archiveChat(chat.id, e)}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') void archiveChat(chat.id, e as never);
@@ -676,53 +732,59 @@ export function AiPanel({
           )}
         </div>
       ) : (
-        <div ref={listRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto py-3">
+        <div ref={listRef} className="dl-ai-thread">
           {!activeChatId || (proposals.length === 0 && !busy) ? (
-            <p className="text-sm text-[var(--dl-muted)]">
-              {activeChat
-                ? `“${activeChat.title}” — send a message to start.`
-                : 'Start a conversation. Auto picks Ask / Edit / Write / Review from your prompt.'}
-            </p>
+            <div className="dl-ai-empty">
+              <p className="dl-ai-empty-title">
+                {activeChat ? activeChat.title : 'Start writing with AI'}
+              </p>
+              <p className="dl-ai-empty-copy">
+                Ask a question, edit existing text, or draft new sections. Auto chooses the
+                right mode from your prompt.
+              </p>
+            </div>
           ) : null}
+
           {proposals.map((p) => (
-            <div key={p.id} className="space-y-1.5">
-              <div className="ml-4 rounded border border-[var(--dl-border)] bg-[var(--dl-bg)] px-2.5 py-2 text-sm">
-                <div className="mb-0.5 text-xs uppercase tracking-wide text-[var(--dl-muted)]">
-                  You · {p.mode}
-                </div>
-                <p className="whitespace-pre-wrap">{p.promptSummary}</p>
+            <div key={p.id} className="dl-ai-turn">
+              <div className="dl-ai-bubble dl-ai-bubble-user">
+                <span className="dl-ai-mode-tag">{p.mode}</span>
+                <p>{p.promptSummary}</p>
               </div>
-              <div className="mr-2 rounded border border-[var(--dl-border)] px-2.5 py-2 text-sm">
-                <div className="mb-0.5 text-xs uppercase tracking-wide text-[var(--dl-muted)]">
-                  Assistant · {p.status}
-                  {p.mode !== 'ask' && Array.isArray(p.ops) && p.ops.length
-                    ? ` · ${p.ops.length} op(s)`
-                    : ''}
+
+              <div className="dl-ai-bubble dl-ai-bubble-assistant">
+                <div className="dl-ai-bubble-meta">
+                  Assistant
+                  <span className="dl-ai-status-tag" data-status={p.status}>
+                    {p.status}
+                    {p.mode !== 'ask' && Array.isArray(p.ops) && p.ops.length
+                      ? ` · ${p.ops.length} op(s)`
+                      : ''}
+                  </span>
                 </div>
-                {p.answer ? <p className="whitespace-pre-wrap">{p.answer}</p> : null}
+                {p.answer ? <p className="dl-ai-bubble-body">{p.answer}</p> : null}
                 {!p.answer && (p.mode === 'ask' || p.mode === 'auto') ? (
-                  <p className="text-[var(--dl-muted)]">(empty reply)</p>
+                  <p className="dl-ai-empty-copy">(empty reply)</p>
                 ) : null}
+
                 {p.citedSourceIds?.length ? (
-                  <div className="mt-1 flex flex-wrap gap-1">
+                  <div className="dl-ai-citations">
                     {p.citedSourceIds.map((id) => {
                       const title = sources.find((s) => s.id === id)?.title ?? id.slice(0, 8);
                       return (
-                        <span
-                          key={id}
-                          className="border border-[var(--dl-border)] px-1.5 py-0.5 text-xs"
-                        >
+                        <span key={id} className="dl-ai-citation">
                           {title}
                         </span>
                       );
                     })}
                   </div>
                 ) : null}
+
                 {p.status === 'pending' && p.mode === 'auto' ? (
-                  <div className="mt-2 flex flex-wrap gap-2">
+                  <div className="dl-ai-actions">
                     <button
                       type="button"
-                      className="border border-[var(--dl-border)] px-2 py-1 text-sm"
+                      className="dl-ai-btn dl-ai-btn-primary"
                       disabled={busy}
                       onClick={() => void resolveClarification(p, 'edit')}
                     >
@@ -730,7 +792,7 @@ export function AiPanel({
                     </button>
                     <button
                       type="button"
-                      className="border border-[var(--dl-border)] px-2 py-1 text-sm"
+                      className="dl-ai-btn dl-ai-btn-primary"
                       disabled={busy}
                       onClick={() => void resolveClarification(p, 'write')}
                     >
@@ -738,7 +800,7 @@ export function AiPanel({
                     </button>
                     <button
                       type="button"
-                      className="border border-[var(--dl-border)] px-2 py-1 text-sm text-[var(--dl-muted)]"
+                      className="dl-ai-btn"
                       disabled={busy}
                       onClick={() => void reject(p.id)}
                     >
@@ -746,44 +808,46 @@ export function AiPanel({
                     </button>
                   </div>
                 ) : null}
+
                 {p.status === 'pending' && p.mode !== 'ask' && p.mode !== 'auto' ? (
-                  <div className="mt-2 flex gap-2">
+                  <div className="dl-ai-actions">
                     <button
                       type="button"
-                      className="border border-[var(--dl-border)] px-2 py-1 text-sm"
+                      className="dl-ai-btn dl-ai-btn-primary"
                       onClick={() => void accept(p.id)}
                     >
                       Apply to document
                     </button>
-                    <button
-                      type="button"
-                      className="border border-[var(--dl-border)] px-2 py-1 text-sm"
-                      onClick={() => void reject(p.id)}
-                    >
+                    <button type="button" className="dl-ai-btn" onClick={() => void reject(p.id)}>
                       Discard
                     </button>
                   </div>
                 ) : null}
+
                 {p.status === 'accepted' && p.mode !== 'ask' && p.mode !== 'auto' ? (
-                  <p className="mt-1 text-xs text-[var(--dl-muted)]">Applied to document</p>
+                  <p className="dl-ai-applied">Applied to document</p>
                 ) : null}
               </div>
             </div>
           ))}
+
           {busy ? (
-            <p className="text-sm text-[var(--dl-muted)]">
-              {mode === 'write' || mode === 'auto' ? 'Writing into document…' : 'Thinking…'}
-            </p>
+            <div className="dl-ai-typing">
+              <span className="dl-ai-spinner" />
+              <span>
+                {mode === 'write' || mode === 'auto' ? 'Writing into document…' : 'Thinking…'}
+              </span>
+            </div>
           ) : null}
         </div>
       )}
 
       {!showHistory ? (
-        <div className="shrink-0 border-t border-[var(--dl-border)] pt-2">
-          {error ? <p className="mb-2 text-sm text-red-600">{error}</p> : null}
+        <div className="dl-ai-composer-wrap">
+          {error ? <p className="dl-ai-error">{error}</p> : null}
           <div className="dl-ai-composer">
             <textarea
-              className="w-full resize-none border-0 bg-transparent px-3.5 pt-3 pb-2 text-sm outline-none placeholder:text-[var(--dl-muted)]"
+              className="dl-ai-composer-input"
               rows={3}
               value={instruction}
               onChange={(e) => setInstruction(e.target.value)}
@@ -793,14 +857,14 @@ export function AiPanel({
                   void run();
                 }
               }}
-              placeholder="Describe what you need — Auto picks the mode"
+              placeholder="Ask, edit, or write… Auto picks the mode"
             />
-            <div className="flex items-center justify-between gap-2 px-2.5 pb-2.5">
-              <div className="flex min-w-0 items-center gap-1.5">
+            <div className="dl-ai-composer-bar">
+              <div className="dl-ai-composer-pills">
                 <ComposerPill
                   label={activeMode.label}
                   title={activeMode.hint}
-                  prefix={<span className="text-[var(--dl-muted)]">∞</span>}
+                  prefix={<span className="dl-ai-pill-prefix">∞</span>}
                   open={menuOpen === 'mode'}
                   onOpenChange={(open) => setMenuOpen(open ? 'mode' : null)}
                 >
@@ -816,21 +880,16 @@ export function AiPanel({
                         setMenuOpen(null);
                       }}
                     >
-                      {m.label}
+                      <span className="dl-ai-menu-label">{m.label}</span>
+                      <span className="dl-ai-menu-hint">{m.hint}</span>
                     </button>
                   ))}
                 </ComposerPill>
                 <ComposerPill
-                  label={
-                    settings
-                      ? `${settings.provider}/${settings.model}`
-                      : 'Model'
-                  }
+                  label={settings ? `${settings.provider}/${settings.model}` : 'Model'}
                   title="Model"
                   open={menuOpen === 'model'}
-                  onOpenChange={(open) =>
-                    settings && setMenuOpen(open ? 'model' : null)
-                  }
+                  onOpenChange={(open) => settings && setMenuOpen(open ? 'model' : null)}
                 >
                   {modelOptions.map((m) => (
                     <button
@@ -849,8 +908,7 @@ export function AiPanel({
                   ))}
                 </ComposerPill>
               </div>
-              <div className="flex shrink-0 items-center gap-0.5">
-                {busy ? <span className="dl-ai-spinner mr-1" title="Running" /> : null}
+              <div className="dl-ai-composer-tools">
                 <input
                   ref={fileRef}
                   type="file"
@@ -872,7 +930,7 @@ export function AiPanel({
                 {busy ? (
                   <button
                     type="button"
-                    className="dl-ai-send"
+                    className="dl-ai-send is-stop"
                     title="Stop"
                     onClick={stop}
                     aria-label="Stop"
@@ -884,11 +942,7 @@ export function AiPanel({
                     type="button"
                     className="dl-ai-send"
                     title={
-                      mode === 'ask'
-                        ? 'Send'
-                        : mode === 'auto'
-                          ? 'Send (auto)'
-                          : 'Send & apply'
+                      mode === 'ask' ? 'Send' : mode === 'auto' ? 'Send (auto)' : 'Send & apply'
                     }
                     disabled={!instruction.trim()}
                     onClick={() => void run()}

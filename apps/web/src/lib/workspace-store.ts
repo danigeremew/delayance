@@ -67,7 +67,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       leftWidth: LEFT_SIDEBAR_DEFAULT,
       rightWidth: RIGHT_SIDEBAR_DEFAULT,
       leftTab: 'documents',
-      layoutMode: 'continuous',
+      layoutMode: 'print',
       saveStatus: 'idle',
       selectedNodeId: null,
       setTheme: (theme) => set({ theme }),
