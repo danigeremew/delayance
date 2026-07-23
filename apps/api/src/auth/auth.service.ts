@@ -118,6 +118,140 @@ export class AuthService {
     return { id: user.id, email: user.email, name: user.name };
   }
 
+  async updateProfile(userId: string, input: { name?: string; email?: string }) {
+    const user = await this.database.db.query.users.findFirst({
+      where: eq(users.id, userId),
+    });
+    if (!user) {
+      throw new UnauthorizedException();
+    }
+
+    if (input.email && input.email.toLowerCase() !== user.email) {
+      const existing = await this.database.db.query.users.findFirst({
+        where: eq(users.email, input.email.toLowerCase()),
+      });
+      if (existing && existing.id !== userId) {
+        throw new ConflictException('Email already registered');
+      }
+    }
+
+    const name = input.name?.trim() ?? user.name;
+    const email = input.email?.toLowerCase().trim() ?? user.email;
+
+    const [updatedUser] = await this.database.db
+      .update(users)
+      .set({
+        name,
+        email,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, userId))
+      .returning();
+
+    if (!updatedUser) {
+      throw new Error('Failed to update profile');
+    }
+
+    await this.database.db.insert(auditEvents).values({
+      actorId: userId,
+      action: 'user.profile_updated',
+      entityType: 'user',
+      entityId: userId,
+    });
+
+    return { id: updatedUser.id, email: updatedUser.email, name: updatedUser.name };
+  }
+
+  async changePassword(
+    userId: string,
+    input: { currentPassword: string; newPassword: string },
+  ) {
+    const user = await this.database.db.query.users.findFirst({
+      where: eq(users.id, userId),
+    });
+    if (!user) {
+      throw new UnauthorizedException();
+    }
+
+    const valid = await bcrypt.compare(input.currentPassword, user.passwordHash);
+    if (!valid) {
+      throw new UnauthorizedException('Current password is incorrect');
+    }
+
+    const newPasswordHash = await bcrypt.hash(input.newPassword, 12);
+    await this.database.db
+      .update(users)
+      .set({
+        passwordHash: newPasswordHash,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, userId));
+
+    // Revoke existing sessions on password change
+    await this.database.db
+      .update(sessions)
+      .set({ revokedAt: new Date() })
+      .where(and(eq(sessions.userId, userId), isNull(sessions.revokedAt)));
+
+    await this.database.db.insert(auditEvents).values({
+      actorId: userId,
+      action: 'user.password_changed',
+      entityType: 'user',
+      entityId: userId,
+    });
+
+    return { ok: true as const };
+  }
+
+  async getSessions(userId: string) {
+    const activeSessions = await this.database.db.query.sessions.findMany({
+      where: and(eq(sessions.userId, userId), isNull(sessions.revokedAt)),
+      orderBy: (sessions, { desc }) => [desc(sessions.createdAt)],
+    });
+
+    const now = new Date();
+    return activeSessions
+      .filter((s) => s.expiresAt.getTime() > now.getTime())
+      .map((s) => ({
+        id: s.id,
+        createdAt: s.createdAt,
+        expiresAt: s.expiresAt,
+      }));
+  }
+
+  async revokeSession(userId: string, sessionId: string) {
+    await this.database.db
+      .update(sessions)
+      .set({ revokedAt: new Date() })
+      .where(and(eq(sessions.id, sessionId), eq(sessions.userId, userId)));
+
+    await this.database.db.insert(auditEvents).values({
+      actorId: userId,
+      action: 'user.session_revoked',
+      entityType: 'session',
+      entityId: sessionId,
+    });
+
+    return { ok: true as const };
+  }
+
+  async revokeAllSessions(userId: string) {
+    await this.database.db
+      .update(sessions)
+      .set({ revokedAt: new Date() })
+      .where(and(eq(sessions.userId, userId), isNull(sessions.revokedAt)));
+
+    await this.database.db.insert(auditEvents).values({
+      actorId: userId,
+      action: 'user.all_sessions_revoked',
+      entityType: 'user',
+      entityId: userId,
+    });
+
+    return { ok: true as const };
+  }
+
+
   private async issueTokens(userId: string, email: string, name: string) {
     const accessToken = await this.jwt.signAsync({
       sub: userId,

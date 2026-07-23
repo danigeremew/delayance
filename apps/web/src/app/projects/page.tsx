@@ -189,10 +189,6 @@ export default function ProjectsHomePage() {
             <span className="dl-home-stat-value">{projects ? totalDocs : '—'}</span>
             <span className="dl-home-stat-label">Documents</span>
           </div>
-          <div className="dl-home-stat">
-            <span className="dl-home-stat-value">Ollama</span>
-            <span className="dl-home-stat-label">Default AI</span>
-          </div>
         </section>
 
         <section className="dl-home-grid-section">

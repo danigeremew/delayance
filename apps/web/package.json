@@ -8,8 +8,9 @@
     "start": "next start --port 3000",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint . --max-warnings 0",
-    "test": "vitest run --passWithNoTests",
+    "test": "vitest run --exclude '**/e2e/**' --passWithNoTests",
     "test:e2e": "playwright test"
+
   },
   "dependencies": {
     "@delayance/design-system": "workspace:*",

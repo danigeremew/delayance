@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { envSchema, registerSchema } from './index';
+import { changePasswordSchema, envSchema, registerSchema } from './index';
+
 
 describe('envSchema', () => {
   it('parses valid env', () => {
@@ -23,3 +24,15 @@ describe('registerSchema', () => {
     ).toThrow();
   });
 });
+
+describe('new auth schemas', () => {
+  it('validates changePasswordSchema', () => {
+    expect(() =>
+      changePasswordSchema.parse({ currentPassword: 'old', newPassword: 'short' }),
+    ).toThrow();
+    expect(
+      changePasswordSchema.parse({ currentPassword: 'old', newPassword: 'validPassword123' }),
+    ).toEqual({ currentPassword: 'old', newPassword: 'validPassword123' });
+  });
+});
+

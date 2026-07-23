@@ -25,8 +25,9 @@ export const LEFT_TABS: { id: LeftTab; label: string }[] = [
   { id: 'comments', label: 'Comments' },
   { id: 'health', label: 'Health' },
   { id: 'layout', label: 'Layout' },
-  { id: 'io', label: 'Import' },
+  { id: 'io', label: 'Export' },
 ];
+
 
 export const SIDEBAR_MIN = 260;
 export const SIDEBAR_MAX = 640;

@@ -3,6 +3,8 @@
 import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { LEFT_TABS, type LeftTab } from '@/lib/workspace-store';
+import { UserMenu } from '@/components/user-menu';
+
 
 const TAB_ICONS: Record<LeftTab, ReactNode> = {
   documents: (
@@ -125,6 +127,10 @@ export function LeftSidebarShell({
             </button>
           );
         })}
+        <div className="mt-auto pt-4 pb-2 flex justify-center">
+          <UserMenu />
+        </div>
+
       </nav>
       <div className="dl-tools-panel">
         <div className="dl-tools-panel-header">
@@ -165,45 +171,188 @@ export function LeftSidebarShell({
   );
 }
 
+import { useState, useRef } from 'react';
+import { useRouter } from 'next/navigation';
+import type { Document } from '@delayance/document-model';
+import { apiFetch, API_URL, getAccessToken } from '@/lib/api';
+
 export function DocumentsList({
   projectId,
   documentId,
   docs,
+  onRefreshDocs,
 }: {
   projectId: string;
   documentId: string;
   docs: { id: string; title: string }[];
+  onRefreshDocs?: () => void;
 }) {
-  if (!docs.length) {
-    return <p className="dl-tools-empty">No documents in this project yet.</p>;
-  }
+  const router = useRouter();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState(false);
+  const [importStatus, setImportStatus] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleCreateNew = async () => {
+    setCreating(true);
+    setError(null);
+    try {
+      const doc = await apiFetch<{ id: string }>(`/projects/${projectId}/documents`, {
+        method: 'POST',
+        body: JSON.stringify({ title: 'Untitled document' }),
+      });
+      if (onRefreshDocs) onRefreshDocs();
+      router.push(`/projects/${projectId}/documents/${doc.id}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Create failed');
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImporting(true);
+    setImportStatus('Uploading file…');
+    setError(null);
+
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      const token = getAccessToken();
+      const upRes = await fetch(`${API_URL}/projects/${projectId}/files`, {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        body: form,
+      });
+      const fileRow = await upRes.json();
+      if (!upRes.ok) throw new Error(fileRow.message ?? 'Upload failed');
+
+      setImportStatus('Processing document…');
+      const started = await apiFetch<{
+        import: { id: string };
+        job: { id: string };
+      }>(`/projects/${projectId}/documents/import`, {
+        method: 'POST',
+        body: JSON.stringify({
+          fileId: fileRow.id,
+          mode: 'normalize',
+        }),
+      });
+
+      for (let i = 0; i < 60; i++) {
+        const job = await apiFetch<{ status: string; error?: string }>(`/jobs/${started.job.id}`);
+        if (job.status === 'completed') break;
+        if (job.status === 'failed') throw new Error(job.error ?? 'Import job failed');
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+
+      setImportStatus('Creating imported document…');
+      const doc = await apiFetch<{ id: string; content: Document }>(
+        `/projects/${projectId}/imports/${started.import.id}/apply`,
+        { method: 'POST', body: JSON.stringify({}) },
+      );
+
+      setImportStatus('Import complete!');
+      if (onRefreshDocs) onRefreshDocs();
+      if (doc.id) {
+        router.push(`/projects/${projectId}/documents/${doc.id}`);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Import failed');
+    } finally {
+      setImporting(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
 
   return (
-    <ul className="dl-doc-list">
-      {docs.map((d) => {
-        const active = d.id === documentId;
-        return (
-          <li key={d.id}>
-            <Link
-              href={`/projects/${projectId}/documents/${d.id}`}
-              className={`dl-doc-list-item${active ? ' is-active' : ''}`}
-              aria-current={active ? 'page' : undefined}
-            >
-              <span className="dl-doc-list-icon" aria-hidden="true">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                  <path
-                    d="M7 3.5h7.5L18.5 7.5V20a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1z"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                  />
-                  <path d="M14 3.5V8h4.5" stroke="currentColor" strokeWidth="1.5" />
-                </svg>
-              </span>
-              <span className="dl-doc-list-title">{d.title || 'Untitled document'}</span>
-            </Link>
-          </li>
-        );
-      })}
-    </ul>
+    <div className="space-y-3">
+      {/* Action Header: New Document & Import */}
+      <div className="flex items-center gap-2 pb-2 border-b border-[var(--dl-border)]">
+        <button
+          type="button"
+          disabled={creating || importing}
+          onClick={handleCreateNew}
+          className="flex-1 flex items-center justify-center gap-1.5 rounded border border-[var(--dl-border)] bg-[var(--dl-bg)] px-2.5 py-1.5 text-xs font-medium text-[var(--dl-fg)] hover:bg-[var(--dl-panel)] disabled:opacity-50"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+          </svg>
+          {creating ? 'Creating…' : 'New Doc'}
+        </button>
+
+        <button
+          type="button"
+          disabled={creating || importing}
+          onClick={() => fileInputRef.current?.click()}
+          className="flex items-center justify-center gap-1.5 rounded border border-[var(--dl-accent)] bg-[var(--dl-accent)] px-2.5 py-1.5 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
+          title="Import document into project"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 3v12M8 11l4 4 4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M4 19h16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+          </svg>
+          {importing ? 'Importing…' : 'Import'}
+        </button>
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".docx,.doc,.txt,.md,.html"
+          className="hidden"
+          onChange={handleFileChange}
+        />
+      </div>
+
+      {importing && importStatus ? (
+        <div className="rounded border border-blue-200 bg-blue-50 p-2 text-xs text-blue-700 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-300">
+          <p className="flex items-center gap-1.5">
+            <span className="inline-block animate-spin">⏳</span> {importStatus}
+          </p>
+        </div>
+      ) : null}
+
+      {error ? (
+        <div className="rounded border border-red-200 bg-red-50 p-2 text-xs text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300">
+          {error}
+        </div>
+      ) : null}
+
+      {/* Document List */}
+      {!docs.length ? (
+        <p className="dl-tools-empty">No documents in this project yet.</p>
+      ) : (
+        <ul className="dl-doc-list">
+          {docs.map((d) => {
+            const active = d.id === documentId;
+            return (
+              <li key={d.id}>
+                <Link
+                  href={`/projects/${projectId}/documents/${d.id}`}
+                  className={`dl-doc-list-item${active ? ' is-active' : ''}`}
+                  aria-current={active ? 'page' : undefined}
+                >
+                  <span className="dl-doc-list-icon" aria-hidden="true">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                      <path
+                        d="M7 3.5h7.5L18.5 7.5V20a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1z"
+                        stroke="currentColor"
+                        strokeWidth="1.5"
+                      />
+                      <path d="M14 3.5V8h4.5" stroke="currentColor" strokeWidth="1.5" />
+                    </svg>
+                  </span>
+                  <span className="dl-doc-list-title">{d.title || 'Untitled document'}</span>
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
   );
 }
+

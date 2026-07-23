@@ -114,4 +114,50 @@ export async function apiFetchSse(
   }
 }
 
+export async function updateProfileApi(data: { name?: string; email?: string }) {
+  return apiFetch<{ id: string; email: string; name: string }>('/auth/profile', {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function changePasswordApi(data: { currentPassword: string; newPassword: string }) {
+  return apiFetch<{ ok: boolean }>('/auth/change-password', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function getSessionsApi() {
+  return apiFetch<Array<{ id: string; createdAt: string; expiresAt: string }>>('/auth/sessions');
+}
+
+export async function revokeSessionApi(sessionId: string) {
+  return apiFetch<{ ok: boolean }>(`/auth/sessions/${sessionId}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function revokeAllSessionsApi() {
+  return apiFetch<{ ok: boolean }>('/auth/sessions/revoke-all', {
+    method: 'POST',
+  });
+}
+
+export async function logoutApi() {
+  const refreshToken = localStorage.getItem('refreshToken');
+  if (refreshToken) {
+    try {
+      await apiFetch('/auth/logout', {
+        method: 'POST',
+        body: JSON.stringify({ refreshToken }),
+      });
+    } catch {
+      // ignore network errors on logout
+    }
+  }
+  clearTokens();
+}
+
 export { API_URL };
+

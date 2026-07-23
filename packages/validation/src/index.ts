@@ -46,3 +46,18 @@ export const loginSchema = z.object({
 export const refreshSchema = z.object({
   refreshToken: z.string().min(1),
 });
+
+export const updateProfileSchema = z.object({
+  name: z.string().min(1).max(200).optional(),
+  email: z.string().email().optional(),
+});
+
+export const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1),
+  newPassword: z.string().min(8).max(128),
+});
+
+export const revokeSessionSchema = z.object({
+  sessionId: z.string().uuid(),
+});
+

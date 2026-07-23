@@ -333,9 +333,9 @@ export default function WorkspacePage() {
       <header className="dl-app-topbar">
         <div className="dl-app-topbar-main">
           <Link
-            href={`/projects/${projectId}`}
+            href="/projects"
             className="dl-app-topbar-back"
-            title="Back to project"
+            title="Back to projects"
           >
             ←
           </Link>
@@ -418,8 +418,20 @@ export default function WorkspacePage() {
               onCollapse={() => setLeftOpen(false)}
             >
               {leftTab === 'documents' ? (
-                <DocumentsList projectId={projectId} documentId={documentId} docs={docs} />
+                <DocumentsList
+                  projectId={projectId}
+                  documentId={documentId}
+                  docs={docs}
+                  onRefreshDocs={async () => {
+                    setDocs(
+                      await apiFetch<{ id: string; title: string }[]>(
+                        `/projects/${projectId}/documents`,
+                      ),
+                    );
+                  }}
+                />
               ) : null}
+
               {leftTab === 'outline' && documentModel ? (
                 <OutlinePanel
                   projectId={projectId}
