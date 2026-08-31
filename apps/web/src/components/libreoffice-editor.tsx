@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '@/lib/api';
+import { buildOfficeLaunchUrl } from '@/editor/office-launch';
 import type {
   DocumentLocation,
   EditorAdapter,
@@ -119,6 +120,10 @@ export function LibreOfficeEditor({
   const [session, setSession] = useState<OfficeSession | null>(null);
   const [error, setError] = useState<string | null>(null);
   const frameName = useMemo(() => `collabora-${documentId}`, [documentId]);
+  const launchUrl = useMemo(() => {
+    if (!session) return '';
+    return buildOfficeLaunchUrl(session.actionUrl, session.wopiSource);
+  }, [session]);
 
   useEffect(() => {
     let active = true;
@@ -159,10 +164,9 @@ export function LibreOfficeEditor({
 
   return (
     <div className="relative flex min-h-0 flex-1 bg-[var(--dl-bg)]">
-      <form ref={form} action={session.actionUrl} method="post" target={frameName} className="hidden">
+      <form ref={form} action={launchUrl} method="post" target={frameName} className="hidden">
         <input name="access_token" value={session.accessToken} readOnly />
         <input name="access_token_ttl" value={String(session.accessTokenTtl)} readOnly />
-        <input name="WOPISrc" value={session.wopiSource} readOnly />
       </form>
       <iframe
         ref={frame}

@@ -64,15 +64,18 @@ services:
       "
 
   collabora:
-    # Pin this digest after the WOPI/bridge compatibility suite has been run.
-    image: collabora/code:24.04.13.3.1
+    # Tag + digest makes Collabora upgrades an explicit code review/change.
+    image: collabora/code:24.04.13.3.1@sha256:c918662331cbd13b28ef2f7d2d7d91055948adfcadaff21c687cbbbe08258729
     container_name: delayance-collabora
     environment:
       aliasgroup1: http://host.docker.internal:48722
       extra_params: >-
         --o:ssl.enable=false
         --o:ssl.termination=false
-        --o:welcome.enable=false
+        --o:home_mode.enable=true
+        --o:allow_update_popup=false
+        --o:fetch_update_check=0
+        --o:experimental_features=false
         --o:storage.wopi.host[0]=host.docker.internal
     extra_hosts:
       - 'host.docker.internal:host-gateway'
