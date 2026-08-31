@@ -13,6 +13,8 @@ import { SidebarResizeHandle } from '@/components/sidebar-resize-handle';
 import { DocumentsList, LeftSidebarShell } from '@/components/left-sidebar';
 import { LibreOfficeEditor } from '@/components/libreoffice-editor';
 import { OfficeOutlinePanel } from '@/components/office-outline-panel';
+import { EditorMenubar } from '@/components/editor-menubar';
+import { LayoutPanel } from '@/components/layout-panel';
 import type { EditorAdapter, EditorSaveState } from '@/editor/adapter';
 
 export default function WorkspacePage() {
@@ -64,7 +66,13 @@ export default function WorkspacePage() {
     <header className="dl-app-topbar"><div className="dl-app-topbar-main">
       <Link href="/projects" className="dl-app-topbar-back" title="Back to projects">←</Link>
       <div className="dl-doc-icon" aria-hidden="true">▤</div>
-      <div className="dl-app-topbar-title-block"><div className="dl-app-topbar-title-row"><h1 className="dl-app-topbar-title">{title}</h1><span className="dl-app-topbar-status">{saveState}</span></div><p className="text-xs text-[var(--dl-muted)]">LibreOffice Writer · Delayance intelligence workspace</p></div>
+      <div className="dl-app-topbar-title-block">
+        <div className="dl-app-topbar-title-row">
+          <h1 className="dl-app-topbar-title">{title}</h1>
+          <span className="dl-app-topbar-status">{saveState}</span>
+        </div>
+        <EditorMenubar editor={editor} onDownload={download} />
+      </div>
       <div className="dl-app-topbar-actions"><button type="button" className="dl-topbar-btn" onClick={() => void editor?.save()}>Save</button><button type="button" className="dl-topbar-btn" onClick={() => setLeftOpen(!leftOpen)}>Tools</button><button type="button" className="dl-topbar-btn" onClick={() => setRightOpen(!rightOpen)}>AI</button><ThemeSwitcher /></div>
     </div></header>
     {error ? <div className="border-b border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</div> : null}
@@ -75,11 +83,25 @@ export default function WorkspacePage() {
         {leftTab === 'sources' ? <SourcesPanel projectId={projectId} /> : null}
         {leftTab === 'memory' ? <p className="dl-tools-empty">Edit project memory from the <Link href={`/projects/${projectId}`}>project hub</Link>.</p> : null}
         {leftTab === 'health' ? <HealthPanel projectId={projectId} documentId={documentId} /> : null}
-        {leftTab === 'comments' ? <p className="dl-tools-empty">Document comments are managed in LibreOffice Writer.</p> : null}
-        {leftTab === 'layout' ? <p className="dl-tools-empty">Page layout, printing, styles, and find/replace are managed in LibreOffice Writer.</p> : null}
+        {leftTab === 'comments' ? (
+          <div className="flex flex-col gap-3 p-3 text-sm">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-[var(--dl-muted)]">Document Comments</h3>
+            <p className="text-xs text-[var(--dl-muted)]">Add and review inline comments inside the document.</p>
+            <button
+              type="button"
+              className="rounded border border-[var(--dl-border)] bg-[var(--dl-bg)] px-3 py-1.5 text-xs hover:bg-[color-mix(in_srgb,var(--dl-fg)_6%,transparent)]"
+              onClick={() => void editor?.executeCommand({ type: 'uno', command: '.uno:InsertAnnotation' })}
+            >
+              + Insert Comment at Selection
+            </button>
+          </div>
+        ) : null}
+        {leftTab === 'layout' ? <LayoutPanel editor={editor} /> : null}
         {leftTab === 'io' ? <button type="button" className="border border-[var(--dl-border)] px-2 py-1 text-left text-sm" onClick={() => void download()}>Download DOCX</button> : null}
       </LeftSidebarShell><SidebarResizeHandle side="left" onResize={setLeftWidth} /></aside> : null}
-      <main className="flex min-w-0 flex-1 flex-col overflow-hidden"><LibreOfficeEditor projectId={projectId} documentId={documentId} onAdapter={setAdapter} onSaveState={setSaveState} /></main>
+      <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <LibreOfficeEditor projectId={projectId} documentId={documentId} onAdapter={setAdapter} onSaveState={setSaveState} />
+      </main>
       {rightOpen ? <aside className="dl-ai-sidebar relative flex shrink-0 flex-col border-l border-[var(--dl-border)] bg-[var(--dl-panel)]" style={{ width: rightWidth }}><SidebarResizeHandle side="right" onResize={setRightWidth} /><AiPanel projectId={projectId} documentId={documentId} selectedNodeId={null} onCollapse={() => setRightOpen(false)} onStreamStart={() => undefined} onStreamToken={() => undefined} onStreamFinish={() => undefined} onStreamAbort={() => undefined} onAccepted={() => setError('AI document mutations are being migrated to the LibreOffice bridge. Ask and Review remain available.')} /></aside> : null}
     </div>
   </div>;

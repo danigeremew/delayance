@@ -130,6 +130,18 @@ export class OfficeService {
       SupportsGetLock: true,
       UserCanNotWriteRelative: true,
       PostMessageOrigin: this.config.env.WEB_ORIGIN,
+      HideSaveOption: true,
+      HideExportOption: true,
+      DisableBreadcrumb: true,
+      BreadcrumbDocName: '',
+      HideUserList: true,
+      HideSideBar: true,
+      HideSidebar: true,
+      HideStatusBar: true,
+      HideRuler: true,
+      DisableSidebar: true,
+      EnableInsertRemoteImage: true,
+      UI_Defaults: 'UIMode=compact;ShowSidebar=false;TextSidebar=false;Sidebar=false;ShowProperties=false;ShowMenubar=false;ShowToolbar=false;ShowStatusbar=false;ShowRuler=false;TextMenubar=false;TextStatusbar=false;TextRuler=false;SaveAsMode=group',
     };
   }
 

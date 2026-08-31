@@ -561,6 +561,11 @@ body {
   cursor: pointer;
 }
 
+.dl-toolbar-select select option {
+  background: var(--dl-panel);
+  color: var(--dl-fg);
+}
+
 .dl-toolbar-select select:hover,
 .dl-toolbar-dropdown:hover,
 .dl-toolbar-dropdown.is-open {

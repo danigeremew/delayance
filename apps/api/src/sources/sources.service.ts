@@ -42,7 +42,7 @@ export class SourcesService {
   }) {
     if (!canEditContent(input.role)) throw new ForbiddenException();
     let text = input.textContent ?? '';
-    let storedObjectId = input.fileId ?? null;
+    const storedObjectId = input.fileId ?? null;
     let processStatus = 'ready';
 
     if (input.fileId) {

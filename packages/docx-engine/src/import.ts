@@ -171,7 +171,6 @@ export async function importDocx(
 
   const parsed = parser.parse(documentXml);
   const body = parsed?.document?.body ?? {};
-  const children: DocNode[] = [];
   const blocks = [
     ...asArray(body.p as Record<string, unknown>).map((p) => ({ kind: 'p' as const, p })),
     ...asArray(body.tbl as Record<string, unknown>).map((tbl) => ({ kind: 'tbl' as const, tbl })),

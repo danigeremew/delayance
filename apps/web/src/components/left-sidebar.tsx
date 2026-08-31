@@ -71,8 +71,7 @@ const TAB_ICONS: Record<LeftTab, ReactNode> = {
   ),
   layout: (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <rect x="4" y="5" width="16" height="14" rx="1.5" stroke="currentColor" strokeWidth="1.6" />
-      <path d="M4 9.5h16M10 9.5v9.5" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   ),
   io: (

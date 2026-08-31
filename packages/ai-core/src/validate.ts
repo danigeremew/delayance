@@ -146,7 +146,7 @@ export function resolveDocumentOps(
     if (retry.ok && retry.ops.length) return retry;
   }
 
-  let validated = validateAiProposal(raw, doc, role);
+  const validated = validateAiProposal(raw, doc, role);
   const answer =
     validated.payload?.answer ??
     (raw && typeof raw === 'object' && 'answer' in raw

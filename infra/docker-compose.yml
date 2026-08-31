@@ -76,6 +76,9 @@ services:
         --o:allow_update_popup=false
         --o:fetch_update_check=0
         --o:experimental_features=false
+        --o:user_interface.writer.sidebar=false
+        --o:user_interface.spreadsheet.sidebar=false
+        --o:user_interface.presentation.sidebar=false
         --o:storage.wopi.host[0]=host.docker.internal
     extra_hosts:
       - 'host.docker.internal:host-gateway'

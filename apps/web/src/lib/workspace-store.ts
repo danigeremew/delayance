@@ -24,7 +24,7 @@ export const LEFT_TABS: { id: LeftTab; label: string }[] = [
   { id: 'memory', label: 'Memory' },
   { id: 'comments', label: 'Comments' },
   { id: 'health', label: 'Health' },
-  { id: 'layout', label: 'Layout' },
+  { id: 'layout', label: 'Properties' },
   { id: 'io', label: 'Export' },
 ];
 

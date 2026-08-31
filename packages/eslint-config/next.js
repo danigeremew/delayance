@@ -4,6 +4,6 @@ import { libraryConfig } from './library.js';
 export default [
   ...libraryConfig,
   {
-    ignores: ['.next/**'],
+    ignores: ['.next/**', 'next-env.d.ts'],
   },
 ];

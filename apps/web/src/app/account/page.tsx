@@ -3,7 +3,6 @@
 import { useEffect, useState, FormEvent } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useAuth } from '@/lib/auth-context';
 import { useAuthGuard } from '@/lib/use-auth-guard';
 import {
   changePasswordApi,
