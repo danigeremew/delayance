@@ -10,19 +10,18 @@ Delayance is an AI Document Workspace built as a modular monolith in a **pnpm + 
 
 ### Applications (`apps/`)
 
-- **`apps/web`**: Next.js frontend UI (React, TailwindCSS, Tiptap editor integration).
+- **`apps/web`**: Next.js workspace UI with Collabora/LibreOffice Writer as the central editing surface.
 - **`apps/api`**: NestJS REST API and OpenAPI/Swagger docs (`http://localhost:48722/docs`).
 - **`apps/worker`**: BullMQ background worker for asynchronous jobs (e.g., DOCX/PDF export, embedding generation).
 - **`apps/collaboration`**: Placeholder for real-time document editing (Yjs / WebSockets).
 
 ### Core Packages (`packages/`)
 
-- **`packages/document-model`**: Canonical structured document schema, node types, and stable ID generation.
-- **`packages/document-engine`**: Deterministic numbering engine, cross-reference resolver, structural operations, TOC generation, validation, and version snapshots.
-- **`packages/docx-engine`**: OOXML import/export, print HTML generation, and Markdown/HTML serializers.
+- **`packages/document-model`**: Versioned document-analysis schema for AI, search, outline, and health.
+- **`packages/document-engine`**: Deterministic analysis traversal, citation/reference checks, health rules, and locations.
+- **`packages/docx-engine`**: DOCX analysis extraction, compatibility inspection, and blank-DOCX creation.
 - **`packages/ai-core`**: Provider-independent prompts, context packing, proposed operation generation, and validation.
 - **`packages/provider-adapters`**: Provider adapters (OpenAI, Ollama, OpenAI-compatible, plus stubs for Anthropic, Gemini, OpenRouter).
-- **`packages/editor-schema`**: Mapping between Tiptap / ProseMirror editor state and the canonical `document-model`.
 - **`packages/design-system`**: UI design tokens and component primitives.
 - **`packages/shared-types`**: Monorepo-wide shared TypeScript interfaces and types.
 - **`packages/validation`**: Shared Zod schemas for request validation and document operations.
@@ -31,25 +30,25 @@ Delayance is an AI Document Workspace built as a modular monolith in a **pnpm + 
 
 ## 2. Mandatory Architectural Constraints & Principles
 
-### A. Canonical Structured Document Model
-- **No Raw Formats as Source of Truth**: Documents are stored in PostgreSQL as structured JSON nodes (sections, headings, paragraphs, figures, tables, cross-references, citations), NOT as unparsed HTML, Markdown, or DOCX XML.
-- **Stable IDs & Dynamic Numbering**: Every node has a permanent, stable ID. Section/figure/table numbers are dynamic and derived deterministically from document structure by `document-engine`. Cross-references link to target node IDs, never hardcoded strings.
+### A. Office File Source of Truth
+- **DOCX in isolated object storage**: Editable files are immutable, content-addressed DOCX objects in MinIO. PostgreSQL stores their metadata, version pointers, analysis, and workflow state; it never stores document binaries.
+- **LibreOffice owns editing**: Collabora/LibreOffice owns formatting, pagination, tables, comments, printing, keyboard shortcuts, and DOCX compatibility. Delayance owns AI and document intelligence.
 
 ### B. Deterministic Engines (No AI Hallucination in Logic)
-- **Programmatic Operations**: Numbering, TOC calculation, cross-reference updating, structural node manipulation, schema validation, OOXML parsing/rendering, and snapshot creation MUST be executed by deterministic code inside `packages/document-engine` and `packages/docx-engine`.
+- **Programmatic operations**: DOCX extraction, analysis, citations, references, health rules, and version metadata MUST be deterministic. Delayance does not reproduce an office formatting model.
 - **Never Delegate Structural Logic to AI**: AI models must never generate section numbers, derive TOCs, or update cross-references directly.
 
 ### C. AI Safety & Mandatory Op-Gating Pipeline
 - **No Direct Database Writes by AI**: AI providers (LLMs) MUST NEVER mutate document records or write directly to PostgreSQL.
 - **Strict Operations Pipeline**:
   1. **Prompt & Context Packing** (`packages/ai-core`)
-  2. **Structured Proposed Operations** returned by AI.
-  3. **Op Validation** (`packages/validation` + `document-engine`).
-  4. **Permissions & Lock Verification** (`apps/api`).
+  2. **Text proposals** returned by AI.
+  3. **Proposal/revision validation** (`packages/validation`).
+  4. **Permissions & WOPI session verification** (`apps/api`).
   5. **User Preview UI** (`apps/web`).
   6. **User Acceptance / Rejection** (Explicit user action).
-  7. **Engine Execution** (`document-engine` mutates document model).
-  8. **Version History Snapshot Created**.
+  7. **Editor bridge execution** (the editor applies text; AI never writes DOCX XML).
+  8. **WOPI save and file version creation**.
 
 ---
 

@@ -24,6 +24,16 @@ export const envSchema = z.object({
     .transform((v) => v === 'true'),
   AUTH_RATE_LIMIT_TTL_MS: z.coerce.number().default(60_000),
   AUTH_RATE_LIMIT_MAX: z.coerce.number().default(20),
+  OFFICE_ENABLED: z
+    .string()
+    .optional()
+    .transform((value) => value !== 'false'),
+  OFFICE_DISCOVERY_URL: z.string().url().default('http://localhost:9980/hosting/discovery'),
+  OFFICE_BROWSER_URL: z.string().url().default('http://localhost:9980'),
+  WEB_ORIGIN: z.string().url().default('http://localhost:48721'),
+  WOPI_BASE_URL: z.string().url().default('http://host.docker.internal:48722'),
+  WOPI_TOKEN_TTL_SECONDS: z.coerce.number().int().min(60).max(86_400).default(28_800),
+  WOPI_LOCK_TTL_SECONDS: z.coerce.number().int().min(60).max(7_200).default(1_800),
 });
 
 export type AppEnv = z.infer<typeof envSchema>;
@@ -60,4 +70,3 @@ export const changePasswordSchema = z.object({
 export const revokeSessionSchema = z.object({
   sessionId: z.string().uuid(),
 });
-

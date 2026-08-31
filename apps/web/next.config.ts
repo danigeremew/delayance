@@ -5,7 +5,6 @@ const nextConfig: NextConfig = {
     '@delayance/design-system',
     '@delayance/document-model',
     '@delayance/document-engine',
-    '@delayance/editor-schema',
   ],
 };
 

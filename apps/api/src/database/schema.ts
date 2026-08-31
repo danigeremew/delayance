@@ -8,8 +8,9 @@ import {
   index,
   integer,
   boolean,
+  bigint,
 } from 'drizzle-orm/pg-core';
-import type { Document, DocumentTemplate } from '@delayance/document-model';
+import type { Document, DocumentAnalysis, DocumentTemplate } from '@delayance/document-model';
 
 export const projectRoleEnum = pgEnum('project_role', [
   'owner',
@@ -39,6 +40,17 @@ export const documentStatusEnum = pgEnum('document_status', [
   'draft',
   'in_review',
   'approved',
+]);
+
+export const documentAnalysisStatusEnum = pgEnum('document_analysis_status', [
+  'pending',
+  'ready',
+  'failed',
+]);
+
+export const officeSessionPermissionEnum = pgEnum('office_session_permission', [
+  'read',
+  'write',
 ]);
 
 export const users = pgTable('users', {
@@ -129,6 +141,16 @@ export const documents = pgTable(
       onDelete: 'set null',
     }),
     content: jsonb('content').$type<Document>().notNull(),
+    /** Office-file fields are the new source of truth. `content` is removed by the clean-break migration. */
+    fileKey: text('file_key'),
+    fileFormat: text('file_format'),
+    fileSize: bigint('file_size', { mode: 'number' }),
+    fileHash: text('file_hash'),
+    currentVersion: integer('current_version').default(0).notNull(),
+    analysisContent: jsonb('analysis_content').$type<DocumentAnalysis>(),
+    analysisVersion: integer('analysis_version').default(0).notNull(),
+    analysisStatus: documentAnalysisStatusEnum('analysis_status').default('pending').notNull(),
+    analysisError: text('analysis_error'),
     searchText: text('search_text').default('').notNull(),
     status: documentStatusEnum('status').default('draft').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
@@ -145,6 +167,11 @@ export const documentVersions = pgTable(
       .notNull()
       .references(() => documents.id, { onDelete: 'cascade' }),
     snapshot: jsonb('snapshot').$type<Document>().notNull(),
+    versionNumber: integer('version_number'),
+    fileKey: text('file_key'),
+    fileHash: text('file_hash'),
+    fileSize: bigint('file_size', { mode: 'number' }),
+    analysisSnapshot: jsonb('analysis_snapshot').$type<DocumentAnalysis>(),
     name: text('name'),
     reason: text('reason'),
     createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
@@ -210,9 +237,30 @@ export const storedObjects = pgTable('stored_objects', {
   objectKey: text('object_key').notNull(),
   contentType: text('content_type'),
   sizeBytes: integer('size_bytes'),
+  sha256: text('sha256'),
   createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
+
+export const officeSessions = pgTable(
+  'office_sessions',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    documentId: uuid('document_id')
+      .notNull()
+      .references(() => documents.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    tokenHash: text('token_hash').notNull().unique(),
+    permission: officeSessionPermissionEnum('permission').notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [index('office_sessions_document_id_idx').on(table.documentId)],
+);
 
 export const jobStatusEnum = pgEnum('job_status', [
   'queued',

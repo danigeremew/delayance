@@ -1,12 +1,13 @@
 import {
   CreateBucketCommand,
   GetObjectCommand,
+  HeadObjectCommand,
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Injectable, OnModuleInit } from '@nestjs/common';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { AppConfigService } from '../config/app-config.service';
 import { DatabaseService } from '../database/database.service';
 import { storedObjects } from '../database/schema';
@@ -66,10 +67,53 @@ export class StorageService implements OnModuleInit {
         objectKey,
         contentType: input.contentType,
         sizeBytes: input.body.length,
+        sha256: createHash('sha256').update(input.body).digest('hex'),
         createdBy: input.userId ?? null,
       })
       .returning();
     return row!;
+  }
+
+  /** Stores a deterministic object key. Document files use immutable content-addressed keys. */
+  async putObjectAtKey(input: {
+    projectId?: string | null;
+    userId?: string | null;
+    objectKey: string;
+    contentType: string;
+    body: Buffer;
+  }) {
+    const sha256 = createHash('sha256').update(input.body).digest('hex');
+    await this.client.send(
+      new PutObjectCommand({
+        Bucket: this.bucket,
+        Key: input.objectKey,
+        Body: input.body,
+        ContentType: input.contentType,
+        Metadata: { sha256 },
+      }),
+    );
+    const [row] = await this.database.db
+      .insert(storedObjects)
+      .values({
+        projectId: input.projectId ?? null,
+        bucket: this.bucket,
+        objectKey: input.objectKey,
+        contentType: input.contentType,
+        sizeBytes: input.body.length,
+        sha256,
+        createdBy: input.userId ?? null,
+      })
+      .returning();
+    return { storedObject: row!, sha256, size: input.body.length };
+  }
+
+  async objectExists(objectKey: string): Promise<boolean> {
+    try {
+      await this.client.send(new HeadObjectCommand({ Bucket: this.bucket, Key: objectKey }));
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   async getObjectBuffer(objectKey: string): Promise<Buffer> {

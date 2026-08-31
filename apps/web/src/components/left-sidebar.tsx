@@ -173,7 +173,6 @@ export function LeftSidebarShell({
 
 import { useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import type { Document } from '@delayance/document-model';
 import { apiFetch, API_URL, getAccessToken } from '@/lib/api';
 
 export function DocumentsList({
@@ -222,40 +221,15 @@ export function DocumentsList({
       const form = new FormData();
       form.append('file', file);
       const token = getAccessToken();
-      const upRes = await fetch(`${API_URL}/projects/${projectId}/files`, {
+      const upRes = await fetch(`${API_URL}/projects/${projectId}/documents/office-import`, {
         method: 'POST',
         headers: token ? { Authorization: `Bearer ${token}` } : undefined,
         body: form,
       });
-      const fileRow = await upRes.json();
-      if (!upRes.ok) throw new Error(fileRow.message ?? 'Upload failed');
+      const doc = await upRes.json();
+      if (!upRes.ok) throw new Error(doc.message ?? 'Import failed');
 
-      setImportStatus('Processing document…');
-      const started = await apiFetch<{
-        import: { id: string };
-        job: { id: string };
-      }>(`/projects/${projectId}/documents/import`, {
-        method: 'POST',
-        body: JSON.stringify({
-          fileId: fileRow.id,
-          mode: 'normalize',
-        }),
-      });
-
-      for (let i = 0; i < 60; i++) {
-        const job = await apiFetch<{ status: string; error?: string }>(`/jobs/${started.job.id}`);
-        if (job.status === 'completed') break;
-        if (job.status === 'failed') throw new Error(job.error ?? 'Import job failed');
-        await new Promise((r) => setTimeout(r, 1000));
-      }
-
-      setImportStatus('Creating imported document…');
-      const doc = await apiFetch<{ id: string; content: Document }>(
-        `/projects/${projectId}/imports/${started.import.id}/apply`,
-        { method: 'POST', body: JSON.stringify({}) },
-      );
-
-      setImportStatus('Import complete!');
+      setImportStatus('Import complete! LibreOffice is ready.');
       if (onRefreshDocs) onRefreshDocs();
       if (doc.id) {
         router.push(`/projects/${projectId}/documents/${doc.id}`);
@@ -301,7 +275,7 @@ export function DocumentsList({
         <input
           ref={fileInputRef}
           type="file"
-          accept=".docx,.doc,.txt,.md,.html"
+          accept=".docx"
           className="hidden"
           onChange={handleFileChange}
         />
@@ -355,4 +329,3 @@ export function DocumentsList({
     </div>
   );
 }
-

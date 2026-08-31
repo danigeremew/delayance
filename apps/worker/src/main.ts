@@ -10,7 +10,7 @@ import {
 } from '@aws-sdk/client-s3';
 import { randomUUID } from 'node:crypto';
 import { parseEnv } from '@delayance/validation';
-import { exportDocx, importDocx, documentToPrintHtml } from '@delayance/docx-engine';
+import { exportDocx, extractDocumentAnalysis, importDocx, documentToPrintHtml } from '@delayance/docx-engine';
 import type { Document } from '@delayance/document-model';
 
 loadEnv({ path: resolve(__dirname, '../../../.env') });
@@ -251,6 +251,35 @@ async function main() {
     note: 'cleanup runs synchronously via API; worker reserved',
     ...data,
   }));
+
+  makeWorker('document.extract', async (data) => {
+    const documentId = String(data.documentId);
+    const fileKey = String(data.fileKey);
+    const fileHash = String(data.fileHash);
+    const version = Number(data.version);
+    const file = await getObject(fileKey);
+    const analysis = await extractDocumentAnalysis(file);
+    if (analysis.fileHash !== fileHash) throw new Error('Document object hash mismatch');
+    await pool.query(
+      `UPDATE document_versions
+       SET analysis_snapshot = $1::jsonb
+       WHERE document_id = $2 AND file_hash = $3 AND version_number = $4`,
+      [JSON.stringify(analysis), documentId, fileHash, version],
+    );
+    // A later save may have overtaken this job. Never regress the current analysis.
+    await pool.query(
+      `UPDATE documents
+       SET analysis_content = $1::jsonb,
+           analysis_version = $2,
+           analysis_status = 'ready',
+           analysis_error = NULL,
+           search_text = $3,
+           updated_at = NOW()
+       WHERE id = $4 AND file_hash = $5 AND current_version = $2`,
+      [JSON.stringify(analysis), version, analysis.plainText.slice(0, 100000), documentId, fileHash],
+    );
+    return { documentId, fileHash, version, nodes: analysis.nodes.length };
+  });
 
   makeWorker('source.process', async (data) => {
     const sourceId = String(data.sourceId);

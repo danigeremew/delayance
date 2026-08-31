@@ -56,6 +56,28 @@ export async function apiFetch<T = unknown>(
   return data as T;
 }
 
+/** Download an authenticated file response without exposing a storage URL to the browser. */
+export async function apiDownload(path: string): Promise<{ blob: Blob; filename: string }> {
+  const headers = new Headers();
+  let token = getAccessToken();
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  let response = await fetch(`${API_URL}${path}`, { headers });
+  if (response.status === 401) {
+    token = await refreshAccessToken();
+    if (token) {
+      headers.set('Authorization', `Bearer ${token}`);
+      response = await fetch(`${API_URL}${path}`, { headers });
+    }
+  }
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error((body as { message?: string }).message ?? `Download failed (${response.status})`);
+  }
+  const disposition = response.headers.get('content-disposition') ?? '';
+  const filename = /filename="?([^";]+)"?/i.exec(disposition)?.[1] ?? 'document.docx';
+  return { blob: await response.blob(), filename };
+}
+
 /** Consume an SSE endpoint that emits `data: {json}\n\n` events. */
 export async function apiFetchSse(
   path: string,
@@ -160,4 +182,3 @@ export async function logoutApi() {
 }
 
 export { API_URL };
-

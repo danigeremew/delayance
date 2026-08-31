@@ -10,6 +10,7 @@ import { HealthModule } from './health/health.module';
 import { InterchangeModule } from './interchange/interchange.module';
 import { JobsModule } from './jobs/jobs.module';
 import { MemoryModule } from './memory/memory.module';
+import { OfficeModule } from './office/office.module';
 import { ProjectsModule } from './projects/projects.module';
 import { RbacModule } from './rbac/rbac.module';
 import { RedisModule } from './redis/redis.module';
@@ -41,6 +42,7 @@ import { TemplatesModule } from './templates/templates.module';
     MemoryModule,
     TemplatesModule,
     DocumentsModule,
+    OfficeModule,
     InterchangeModule,
     AiModule,
     SourcesModule,

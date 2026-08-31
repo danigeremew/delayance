@@ -53,6 +53,23 @@ export class DocumentsController {
     return this.documents.create(projectId, req.user.userId, body);
   }
 
+  @Post('office-import')
+  @RequireProjectRoles('contributor')
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: 100 * 1024 * 1024 } }))
+  importOfficeFile(
+    @Param('projectId') projectId: string,
+    @Req() req: { user: ProjectRequestUser },
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    if (!file) throw new Error('file required');
+    const title = file.originalname.replace(/\.docx$/i, '') || 'Imported document';
+    return this.documents.importOfficeFile(projectId, req.user.userId, req.user.projectRole!, {
+      title,
+      buffer: file.buffer,
+    });
+  }
+
   @Get(':documentId')
   @RequireProjectRoles('viewer')
   get(@Param('projectId') projectId: string, @Param('documentId') documentId: string) {

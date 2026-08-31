@@ -63,6 +63,25 @@ services:
       exit 0;
       "
 
+  collabora:
+    # Pin this digest after the WOPI/bridge compatibility suite has been run.
+    image: collabora/code:24.04.13.3.1
+    container_name: delayance-collabora
+    environment:
+      aliasgroup1: http://host.docker.internal:48722
+      extra_params: >-
+        --o:ssl.enable=false
+        --o:ssl.termination=false
+        --o:welcome.enable=false
+        --o:storage.wopi.host[0]=host.docker.internal
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    ports:
+      - '9980:9980'
+    cap_add:
+      - MKNOD
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   redis_data:

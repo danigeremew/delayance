@@ -6,26 +6,25 @@
 
 Delayance is an AI Document Workspace built as a modular monolith in a **pnpm + Turborepo** monorepo (Node.js >= 22).
 
-- **`apps/web`**: Next.js frontend UI (React, TailwindCSS, Tiptap editor).
+- **`apps/web`**: Next.js workspace UI with Collabora/LibreOffice Writer as its central editing surface.
 - **`apps/api`**: NestJS REST API and OpenAPI/Swagger docs (`http://localhost:48722/docs`).
 - **`apps/worker`**: BullMQ background worker for export and asynchronous jobs.
 - **`apps/collaboration`**: Placeholder for real-time collaboration.
-- **`packages/document-model`**: Canonical structured document schema & stable IDs.
-- **`packages/document-engine`**: Deterministic numbering, cross-references, TOC, structural ops, validation, snapshots.
-- **`packages/docx-engine`**: OOXML import/export, print HTML, MD/HTML serializers.
+- **`packages/document-model`**: Versioned document-analysis schema used for AI, search, outline, and health.
+- **`packages/document-engine`**: Deterministic analysis traversal, citation/reference checks, health rules, and locations.
+- **`packages/docx-engine`**: DOCX analysis extraction, compatibility inspection, and blank-DOCX creation.
 - **`packages/ai-core`**: Provider-independent prompts, context packing, proposed ops validation.
 - **`packages/provider-adapters`**: OpenAI, Ollama, OpenAI-compatible, Anthropic/Gemini stubs.
-- **`packages/editor-schema`**: Tiptap ↔ canonical `document-model` mapping.
 - **`packages/design-system`**, **`packages/shared-types`**, **`packages/validation`**.
 
 ---
 
 ## 2. Core Architectural Constraints
 
-1. **Canonical Document Model**: Documents are stored as structured JSON nodes with stable IDs in PostgreSQL—never raw unparsed HTML/Markdown/DOCX as source of truth.
-2. **Deterministic Engines**: Dynamic numbering, cross-references, TOC, structural edits, OOXML conversion, and snapshots MUST be executed by programmatic logic (`document-engine`, `docx-engine`), never hallucinated by AI.
+1. **Office File Source of Truth**: DOCX bytes are immutable, content-addressed MinIO objects. PostgreSQL stores file metadata, version pointers, analysis, and workflow state; it never stores document binaries.
+2. **LibreOffice Owns Editing**: Collabora/LibreOffice provides formatting, pagination, tables, comments, shortcuts, printing, and DOCX compatibility. Delayance provides intelligence around it.
 3. **AI Safety Gating Pipeline**: AI MUST NEVER mutate document DB state directly.
-   Pipeline: `Proposed Ops` → `Validation` → `Permissions/Lock Check` → `User Preview UI` → `User Accept/Reject` → `Document Engine Execution` → `Snapshot`.
+   Pipeline: `Proposal` → `Validation` → `Permissions/Revision Check` → `User Preview` → `User Accept/Reject` → `Editor Bridge` → `WOPI Save/Version`.
 
 ---
 

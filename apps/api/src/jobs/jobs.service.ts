@@ -11,6 +11,7 @@ export const DOCX_EXPORT_QUEUE = 'docx.export';
 export const PDF_EXPORT_QUEUE = 'pdf.export';
 export const DOCUMENT_CLEANUP_QUEUE = 'document.cleanup';
 export const SOURCE_PROCESS_QUEUE = 'source.process';
+export const DOCUMENT_EXTRACT_QUEUE = 'document.extract';
 
 @Injectable()
 export class JobsService implements OnModuleDestroy {
@@ -28,6 +29,7 @@ export class JobsService implements OnModuleDestroy {
       [PDF_EXPORT_QUEUE]: new Queue(PDF_EXPORT_QUEUE, { connection }),
       [DOCUMENT_CLEANUP_QUEUE]: new Queue(DOCUMENT_CLEANUP_QUEUE, { connection }),
       [SOURCE_PROCESS_QUEUE]: new Queue(SOURCE_PROCESS_QUEUE, { connection }),
+      [DOCUMENT_EXTRACT_QUEUE]: new Queue(DOCUMENT_EXTRACT_QUEUE, { connection }),
     };
   }
 

@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { and, desc, eq } from 'drizzle-orm';
+import { createHash } from 'node:crypto';
 import {
   applyOperation,
   createSnapshot,
@@ -34,6 +35,7 @@ import { AuditService } from '../rbac/audit.service';
 import { canComment, canEditContent } from '../rbac/roles';
 import { StorageService } from '../storage/storage.service';
 import { TemplatesService } from '../templates/templates.service';
+import { DOCUMENT_EXTRACT_QUEUE, JobsService } from '../jobs/jobs.service';
 
 function asDocument(content: unknown): Document {
   return documentSchema.parse(content) as Document;
@@ -46,6 +48,7 @@ export class DocumentsService {
     private readonly audit: AuditService,
     private readonly templates: TemplatesService,
     private readonly storage: StorageService,
+    private readonly jobs: JobsService,
   ) {}
 
   list(projectId: string) {
@@ -88,26 +91,65 @@ export class DocumentsService {
       content.template = template.definition;
     }
 
+    // A newly-created document is immediately a DOCX-backed document. The empty JSON
+    // model remains only until the clean-break migration drops legacy columns.
+    const exported = await exportDocx(content, {
+      includeTocField: false,
+      includePageNumberFields: true,
+    });
+    const fileHash = createHash('sha256').update(exported.buffer).digest('hex');
+    const documentId = generateNodeId();
+    const fileKey = `documents/${documentId}/files/${fileHash}.docx`;
+    if (!(await this.storage.objectExists(fileKey))) {
+      await this.storage.putObjectAtKey({
+        projectId,
+        userId,
+        objectKey: fileKey,
+        contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        body: exported.buffer,
+      });
+    }
+
     const [row] = await this.database.db
       .insert(documents)
       .values({
+        id: documentId,
         projectId,
         title: input.title,
         templateId: template?.id ?? null,
         content,
         searchText: documentToPlainText(content).slice(0, 100_000),
+        fileKey,
+        fileFormat: 'docx',
+        fileSize: exported.buffer.length,
+        fileHash,
+        currentVersion: 1,
+        analysisStatus: 'pending',
         status: 'draft',
       })
       .returning();
 
     if (!row) throw new Error('Failed to create document');
 
-    await this.saveVersion(row.id, content, userId, 'Initial version', 'document.created');
+    await this.saveVersion(row.id, content, userId, 'Initial version', 'document.created', {
+      versionNumber: 1,
+      fileKey,
+      fileHash,
+      fileSize: exported.buffer.length,
+    });
     await this.audit.record({
       actorId: userId,
       action: 'document.created',
       entityType: 'document',
       entityId: row.id,
+    });
+    await this.jobs.createAndEnqueue({
+      type: 'document.extract',
+      queue: DOCUMENT_EXTRACT_QUEUE,
+      projectId,
+      documentId: row.id,
+      userId,
+      payload: { documentId: row.id, projectId, fileKey, fileHash, version: 1 },
     });
     return row;
   }
@@ -195,6 +237,74 @@ export class DocumentsService {
       entityId: documentId,
     });
     return row;
+  }
+
+  async importOfficeFile(
+    projectId: string,
+    userId: string,
+    role: ProjectRole,
+    input: { title: string; buffer: Buffer },
+  ) {
+    if (!canEditContent(role)) throw new ForbiddenException('Cannot import document');
+    const created = await this.create(projectId, userId, { title: input.title });
+    return this.replaceOfficeFile(projectId, created.id, userId, role, input.buffer, 'docx.import');
+  }
+
+  async replaceOfficeFile(
+    projectId: string,
+    documentId: string,
+    userId: string,
+    role: ProjectRole,
+    buffer: Buffer,
+    reason: string,
+  ) {
+    if (!canEditContent(role)) throw new ForbiddenException('Cannot edit document');
+    if (buffer.length === 0 || buffer.length > 100 * 1024 * 1024) {
+      throw new BadRequestException('Invalid DOCX file size');
+    }
+    const existing = await this.get(projectId, documentId);
+    const fileHash = createHash('sha256').update(buffer).digest('hex');
+    if (fileHash === existing.fileHash) return existing;
+    const fileKey = `documents/${documentId}/files/${fileHash}.docx`;
+    if (!(await this.storage.objectExists(fileKey))) {
+      await this.storage.putObjectAtKey({
+        projectId,
+        userId,
+        objectKey: fileKey,
+        contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        body: buffer,
+      });
+    }
+    const version = existing.currentVersion + 1;
+    const [row] = await this.database.db
+      .update(documents)
+      .set({
+        fileKey,
+        fileFormat: 'docx',
+        fileSize: buffer.length,
+        fileHash,
+        currentVersion: version,
+        analysisStatus: 'pending',
+        analysisError: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(documents.id, documentId))
+      .returning();
+    await this.saveVersion(documentId, asDocument(existing.content), userId, undefined, reason, {
+      versionNumber: version,
+      fileKey,
+      fileHash,
+      fileSize: buffer.length,
+    });
+    await this.jobs.createAndEnqueue({
+      type: 'document.extract',
+      queue: DOCUMENT_EXTRACT_QUEUE,
+      projectId,
+      documentId,
+      userId,
+      payload: { documentId, projectId, fileKey, fileHash, version },
+    });
+    return row!;
   }
 
   async applyOp(
@@ -520,6 +630,7 @@ export class DocumentsService {
     userId: string,
     name?: string,
     reason?: string,
+    file?: { versionNumber: number; fileKey: string; fileHash: string; fileSize: number },
   ) {
     const snap = createSnapshot(content, { name, reason });
     await this.database.db.insert(documentVersions).values({
@@ -528,6 +639,7 @@ export class DocumentsService {
       name: name ?? null,
       reason: reason ?? null,
       createdBy: userId,
+      ...(file ?? {}),
     });
   }
 

@@ -19,10 +19,9 @@ Applications may run as separate processes but share one codebase with clear pac
 
 | Package | Role |
 | --- | --- |
-| `document-model` | Canonical structured document schema and stable IDs |
-| `document-engine` | Numbering, cross-references, structural ops, validation, version snapshots |
-| `editor-schema` | Tiptap/ProseMirror ↔ document-model (Phase 4+) |
-| `docx-engine` | OOXML import/export, print HTML, MD/HTML serializers |
+| `document-model` | Versioned document-analysis schema for AI, search, outline, and health |
+| `document-engine` | Analysis traversal, citation/reference checks, health rules, and locations |
+| `docx-engine` | DOCX analysis extraction, compatibility inspection, and blank-DOCX creation |
 | `ai-core` | Provider-independent prompts, context packing, op validation |
 | `provider-adapters` | OpenAI, Ollama, OpenAI-compatible (+ thin Anthropic/Gemini/OpenRouter stubs) |
 | `design-system` | App theme tokens (separate from document template styles) |
@@ -31,7 +30,7 @@ Applications may run as separate processes but share one codebase with clear pac
 
 ## Data plane
 
-- **PostgreSQL** (+ JSONB, pgvector) — relational data and document JSON
+- **PostgreSQL** (+ JSONB, pgvector) — relational metadata, analysis, and workflow state
 - **Redis** — BullMQ queues, rate limiting
 - **MinIO** — S3-compatible object storage for files
 
@@ -39,15 +38,13 @@ Applications may run as separate processes but share one codebase with clear pac
 
 ### Canonical document model
 
-Documents are stored as structured JSON nodes (sections, headings, figures, tables, cross-references, etc.), not as raw HTML, Markdown, or DOCX XML.
-
-Each important node has a **stable ID**. Visible numbering is derived from structure. Cross-references point at IDs, not visible labels.
+Editable documents are DOCX files in isolated, content-addressed MinIO storage. Collabora/LibreOffice Writer owns editing and formatting; PostgreSQL keeps only metadata and Delayance's extracted analysis representation.
 
 ### AI safety
 
 AI providers must never write document content directly to the database.
 
-Pipeline: structured proposed ops → validate → permissions → lock check → preview → accept/reject → document-engine → version history.
+Pipeline: text proposal → revision/permission validation → preview → accept/reject → editor bridge → WOPI save/version history.
 
 ### Deterministic document processing
 
