@@ -12,6 +12,7 @@ interface EditorToolbarProps {
   onZoomChange: (zoom: number) => void;
   onCiteError?: (message: string) => void;
   onToggleComments?: () => void;
+  onToggleFindReplace?: () => void;
 }
 
 const FONT_FAMILIES = [
@@ -35,10 +36,16 @@ export function EditorToolbar({
   onZoomChange,
   onCiteError,
   onToggleComments,
+  onToggleFindReplace,
 }: EditorToolbarProps) {
   const [, setTick] = useState(0);
   const [styleOpen, setStyleOpen] = useState(false);
   const [alignOpen, setAlignOpen] = useState(false);
+  const [spacingOpen, setSpacingOpen] = useState(false);
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [linkUrl, setLinkUrl] = useState('');
+  const [imageOpen, setImageOpen] = useState(false);
+  const [imageUrl, setImageUrl] = useState('');
   const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -57,6 +64,8 @@ export function EditorToolbar({
       if (!rootRef.current?.contains(e.target as Node)) {
         setStyleOpen(false);
         setAlignOpen(false);
+        setSpacingOpen(false);
+        setImageOpen(false);
       }
     };
     document.addEventListener('mousedown', onDocClick);
@@ -282,11 +291,117 @@ export function EditorToolbar({
           >
             <span className="dl-tool-letter strike">S</span>
           </ToolIcon>
+          <ToolIcon
+            title="Text Color"
+            onClick={() => {}}
+          >
+            <label className="flex items-center cursor-pointer" title="Text color">
+              <span className="font-bold text-xs" style={{ color: (editor?.getAttributes('textStyle').color as string) || 'currentColor' }}>A</span>
+              <input
+                type="color"
+                className="sr-only"
+                onChange={(e) => editor?.chain().focus().setColor(e.target.value).run()}
+              />
+            </label>
+          </ToolIcon>
+          <ToolIcon
+            title="Highlight Color"
+            active={editor?.isActive('highlight')}
+            onClick={() => {}}
+          >
+            <label className="flex items-center cursor-pointer" title="Highlight color">
+              <span className="bg-yellow-200 px-0.5 font-bold text-xs text-black">H</span>
+              <input
+                type="color"
+                className="sr-only"
+                onChange={(e) => editor?.chain().focus().toggleHighlight({ color: e.target.value }).run()}
+              />
+            </label>
+          </ToolIcon>
+          <ToolIcon
+            title="Superscript (Ctrl+.)"
+            active={editor?.isActive('superscript')}
+            onClick={() => editor?.chain().focus().toggleSuperscript().run()}
+          >
+            <span className="dl-tool-letter">x<sup className="text-[8px]">2</sup></span>
+          </ToolIcon>
+          <ToolIcon
+            title="Subscript (Ctrl+,)"
+            active={editor?.isActive('subscript')}
+            onClick={() => editor?.chain().focus().toggleSubscript().run()}
+          >
+            <span className="dl-tool-letter">x<sub className="text-[8px]">2</sub></span>
+          </ToolIcon>
+          <div className="relative">
+            <ToolIcon
+              title="Insert link (Ctrl+K)"
+              active={editor?.isActive('link')}
+              onClick={() => {
+                const existing = (editor?.getAttributes('link').href as string) || '';
+                setLinkUrl(existing);
+                setLinkOpen((v) => !v);
+              }}
+            >
+              <span className="font-semibold text-xs">🔗</span>
+            </ToolIcon>
+            {linkOpen && (
+              <div className="absolute top-full left-0 z-50 mt-1 flex items-center gap-1.5 rounded-lg border border-[var(--dl-border)] bg-[var(--dl-panel)] p-2 shadow-xl text-xs">
+                <input
+                  type="url"
+                  placeholder="https://example.com"
+                  value={linkUrl}
+                  onChange={(e) => setLinkUrl(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      if (linkUrl.trim()) {
+                        editor?.chain().focus().extendMarkRange('link').setLink({ href: linkUrl.trim() }).run();
+                      } else {
+                        editor?.chain().focus().extendMarkRange('link').unsetLink().run();
+                      }
+                      setLinkOpen(false);
+                    } else if (e.key === 'Escape') {
+                      setLinkOpen(false);
+                    }
+                  }}
+                  className="w-48 rounded border border-[var(--dl-border)] bg-[var(--dl-bg)] px-2 py-1 text-xs text-[var(--dl-fg)] focus:outline-none focus:ring-1 focus:ring-[var(--dl-accent)]"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (linkUrl.trim()) {
+                      editor?.chain().focus().extendMarkRange('link').setLink({ href: linkUrl.trim() }).run();
+                    } else {
+                      editor?.chain().focus().extendMarkRange('link').unsetLink().run();
+                    }
+                    setLinkOpen(false);
+                  }}
+                  className="rounded bg-[var(--dl-accent)] px-2.5 py-1 font-medium text-white hover:opacity-90"
+                >
+                  Save
+                </button>
+                {editor?.isActive('link') && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      editor?.chain().focus().extendMarkRange('link').unsetLink().run();
+                      setLinkOpen(false);
+                    }}
+                    className="rounded bg-red-500/10 px-2.5 py-1 font-medium text-red-600 hover:bg-red-500/20 dark:text-red-400"
+                  >
+                    Unlink
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
         </div>
 
         <ToolbarDivider />
 
         <div className="dl-toolbar-group">
+          <ToolIcon title="Find & Replace (Ctrl+F)" onClick={() => onToggleFindReplace?.()}>
+            <span className="font-semibold text-xs">🔍</span>
+          </ToolIcon>
           <ToolIcon title="Insert citation" onClick={insertCite}>
             <IconCite />
           </ToolIcon>
@@ -317,6 +432,48 @@ export function EditorToolbar({
           >
             <IconPageBreak />
           </ToolIcon>
+          <div className="relative">
+            <ToolIcon
+              title="Insert image"
+              onClick={() => {
+                setImageUrl('');
+                setImageOpen((v) => !v);
+              }}
+            >
+              <IconImage />
+            </ToolIcon>
+            {imageOpen && (
+              <div className="absolute top-full left-0 z-50 mt-1 flex items-center gap-1.5 rounded-lg border border-[var(--dl-border)] bg-[var(--dl-panel)] p-2 shadow-xl text-xs">
+                <input
+                  type="url"
+                  placeholder="Image URL…"
+                  value={imageUrl}
+                  onChange={(e) => setImageUrl(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && imageUrl.trim()) {
+                      editor?.chain().focus().setImage({ src: imageUrl.trim() }).run();
+                      setImageOpen(false);
+                    } else if (e.key === 'Escape') {
+                      setImageOpen(false);
+                    }
+                  }}
+                  className="w-48 rounded border border-[var(--dl-border)] bg-[var(--dl-bg)] px-2 py-1 text-xs text-[var(--dl-fg)] focus:outline-none focus:ring-1 focus:ring-[var(--dl-accent)]"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (imageUrl.trim()) {
+                      editor?.chain().focus().setImage({ src: imageUrl.trim() }).run();
+                      setImageOpen(false);
+                    }
+                  }}
+                  className="rounded bg-[var(--dl-accent)] px-2.5 py-1 font-medium text-white hover:opacity-90"
+                >
+                  Insert
+                </button>
+              </div>
+            )}
+          </div>
         </div>
 
         <ToolbarDivider />
@@ -370,14 +527,66 @@ export function EditorToolbar({
           ) : null}
         </div>
 
-        <div className="dl-toolbar-group">
-          <ToolIcon
-            title="Line spacing / block quote"
-            active={editor?.isActive('blockquote')}
-            onClick={() => editor?.chain().focus().toggleBlockquote().run()}
+        <div className="dl-toolbar-group dl-toolbar-dropdown-wrap">
+          <button
+            type="button"
+            className={`dl-toolbar-icon ${spacingOpen ? 'is-active' : ''}`}
+            title="Line spacing"
+            aria-expanded={spacingOpen}
+            onClick={() => {
+              setSpacingOpen((v) => !v);
+              setAlignOpen(false);
+              setStyleOpen(false);
+            }}
           >
             <IconSpacing />
-          </ToolIcon>
+            <IconChevron small />
+          </button>
+          {spacingOpen ? (
+            <div className="dl-toolbar-menu" role="menu">
+              {(
+                [
+                  ['1.0', '1'],
+                  ['1.15', '1.15'],
+                  ['1.5', '1.5'],
+                  ['2.0', '2'],
+                  ['2.5', '2.5'],
+                  ['3.0', '3'],
+                ] as const
+              ).map(([label, value]) => {
+                const current =
+                  (editor?.getAttributes('paragraph').lineSpacing as string) ||
+                  (editor?.getAttributes('heading').lineSpacing as string) ||
+                  '';
+                return (
+                  <button
+                    key={value}
+                    type="button"
+                    className={current === value ? 'is-active' : ''}
+                    onClick={() => {
+                      editor?.chain().focus().setLineSpacing(value).run();
+                      setSpacingOpen(false);
+                    }}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+              <div className="dl-menu-divider" role="separator" />
+              <button
+                type="button"
+                onClick={() => {
+                  editor?.chain().focus().unsetLineSpacing().run();
+                  setSpacingOpen(false);
+                }}
+              >
+                Default
+              </button>
+            </div>
+          ) : null}
+        </div>
+
+        <div className="dl-toolbar-group">
           <ToolIcon
             title="Bulleted list"
             active={editor?.isActive('bulletList')}
@@ -391,6 +600,13 @@ export function EditorToolbar({
             onClick={() => editor?.chain().focus().toggleOrderedList().run()}
           >
             <IconNumberList />
+          </ToolIcon>
+          <ToolIcon
+            title="Task list"
+            active={editor?.isActive('taskList')}
+            onClick={() => editor?.chain().focus().toggleTaskList().run()}
+          >
+            <IconTaskList />
           </ToolIcon>
           <ToolIcon
             title="Decrease indent"
@@ -723,6 +939,33 @@ function IconClearFormat() {
         strokeLinecap="round"
         strokeLinejoin="round"
       />
+    </svg>
+  );
+}
+
+function IconImage() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <rect x="4" y="4" width="16" height="16" rx="2" stroke="currentColor" strokeWidth="1.6" />
+      <circle cx="9" cy="9" r="1.5" fill="currentColor" />
+      <path
+        d="M4 16l4-4 3 3 3-3 6 6"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function IconTaskList() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <rect x="4" y="5" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M5.5 7.5l1 1 2-2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+      <rect x="4" y="14" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M12 7.5h8M12 16.5h8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
     </svg>
   );
 }

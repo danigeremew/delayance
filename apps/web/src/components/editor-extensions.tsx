@@ -1,6 +1,7 @@
 'use client';
 
 import { Node, mergeAttributes } from '@tiptap/core';
+import { generateNodeId } from '@delayance/document-model';
 
 function idAttr() {
   return {
@@ -107,6 +108,15 @@ export const PageBreak = Node.create({
         class: 'dl-page-break',
       }),
     ];
+  },
+  addKeyboardShortcuts() {
+    return {
+      'Mod-Enter': () =>
+        this.editor.commands.insertContent({
+          type: this.name,
+          attrs: { id: generateNodeId() },
+        }),
+    };
   },
 });
 

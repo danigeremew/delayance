@@ -13,6 +13,19 @@ import { Table } from '@tiptap/extension-table';
 import { TableRow } from '@tiptap/extension-table-row';
 import { TableCell } from '@tiptap/extension-table-cell';
 import { TableHeader } from '@tiptap/extension-table-header';
+import TiptapLink from '@tiptap/extension-link';
+import Color from '@tiptap/extension-color';
+import Highlight from '@tiptap/extension-highlight';
+import CharacterCount from '@tiptap/extension-character-count';
+import Superscript from '@tiptap/extension-superscript';
+import Subscript from '@tiptap/extension-subscript';
+import TaskList from '@tiptap/extension-task-list';
+import TaskItem from '@tiptap/extension-task-item';
+import Image from '@tiptap/extension-image';
+import Dropcursor from '@tiptap/extension-dropcursor';
+import Typography from '@tiptap/extension-typography';
+import { LineSpacing } from '@/components/line-spacing';
+import { EditorFindReplace } from '@/components/editor-find-replace';
 import {
   computeNumbering,
   type DocumentOperation,
@@ -89,6 +102,7 @@ export default function WorkspacePage() {
   const [numbering, setNumbering] = useState<NumberingMap>({});
   const [error, setError] = useState<string | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [findReplaceOpen, setFindReplaceOpen] = useState(false);
   const [editorZoom, setEditorZoom] = useState(100);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loadedId = useRef<string | null>(null);
@@ -97,6 +111,17 @@ export default function WorkspacePage() {
   const preStreamDoc = useRef<Document | null>(null);
   const preStreamJson = useRef<JSONContent | null>(null);
   const streamTyper = useRef<WordStreamTyper | null>(null);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
+        e.preventDefault();
+        setFindReplaceOpen((v) => !v);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   const editor = useEditor({
     immediatelyRender: false,
@@ -108,6 +133,13 @@ export default function WorkspacePage() {
       TextStyle,
       FontFamily,
       FontSize,
+      TiptapLink.configure({
+        openOnClick: false,
+        autolink: true,
+      }),
+      Color,
+      Highlight.configure({ multicolor: true }),
+      CharacterCount,
       TextAlign.configure({
         types: ['heading', 'paragraph'],
       }),
@@ -128,6 +160,14 @@ export default function WorkspacePage() {
       Footnote,
       StableIds,
       PrintPageGaps,
+      Superscript,
+      Subscript,
+      TaskList,
+      TaskItem.configure({ nested: true }),
+      Image.configure({ inline: false, allowBase64: true }),
+      Dropcursor.configure({ color: 'var(--dl-accent)', width: 2 }),
+      Typography,
+      LineSpacing,
     ],
     onUpdate: ({ editor: ed }) => {
       if (updating.current || aiStreaming.current || !documentModel) return;
@@ -545,8 +585,16 @@ export default function WorkspacePage() {
                   setLeftOpen(true);
                   setLeftTab('comments');
                 }}
+                onToggleFindReplace={() => setFindReplaceOpen((v) => !v)}
               />
-              <div className="dl-preview-desk">
+              <div className="dl-preview-desk relative">
+                <div className="absolute top-3 right-5 z-40">
+                  <EditorFindReplace
+                    editor={editor}
+                    isOpen={findReplaceOpen}
+                    onClose={() => setFindReplaceOpen(false)}
+                  />
+                </div>
                 <div
                   className="dl-preview-zoom"
                   style={{
@@ -563,6 +611,29 @@ export default function WorkspacePage() {
                   >
                     <EditorContent editor={editor} className="prose-doc" />
                   </div>
+                </div>
+                <div className="absolute bottom-2 right-4 flex items-center gap-3 rounded-full bg-[var(--dl-panel)]/80 backdrop-blur px-3 py-1 text-[11px] text-[var(--dl-muted)] border border-[var(--dl-border)] shadow-sm pointer-events-none">
+                  <span>
+                    Words:{' '}
+                    <strong className="text-[var(--dl-fg)] font-medium">
+                      {editor?.storage.characterCount?.words?.() ??
+                        editor
+                          ?.getText()
+                          .trim()
+                          .split(/\s+/)
+                          .filter(Boolean).length ??
+                        0}
+                    </strong>
+                  </span>
+                  <span>•</span>
+                  <span>
+                    Characters:{' '}
+                    <strong className="text-[var(--dl-fg)] font-medium">
+                      {editor?.storage.characterCount?.characters?.() ??
+                        editor?.getText().length ??
+                        0}
+                    </strong>
+                  </span>
                 </div>
               </div>
             </>

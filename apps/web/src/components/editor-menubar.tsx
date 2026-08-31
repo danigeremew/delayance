@@ -249,6 +249,18 @@ export function EditorMenubar({
             label="Block quote"
             onClick={() => run((ed) => ed.chain().focus().toggleBlockquote().run())}
           />
+          <MenuDivider />
+          <MenuItem
+            label="Image"
+            onClick={() => {
+              const url = window.prompt('Image URL:');
+              if (url) run((ed) => ed.chain().focus().setImage({ src: url }).run());
+            }}
+          />
+          <MenuItem
+            label="Task list"
+            onClick={() => run((ed) => ed.chain().focus().toggleTaskList().run())}
+          />
         </MenuTrigger>
 
         <MenuTrigger label="Format" open={openMenu === 'format'} onToggle={() => toggle('format')}>
@@ -284,6 +296,17 @@ export function EditorMenubar({
           <MenuItem
             label="Clear formatting"
             onClick={() => run((ed) => ed.chain().focus().unsetAllMarks().clearNodes().run())}
+          />
+          <MenuDivider />
+          <MenuItem
+            label="Superscript"
+            shortcut="⌘."
+            onClick={() => run((ed) => ed.chain().focus().toggleSuperscript().run())}
+          />
+          <MenuItem
+            label="Subscript"
+            shortcut="⌘,"
+            onClick={() => run((ed) => ed.chain().focus().toggleSubscript().run())}
           />
         </MenuTrigger>
 
