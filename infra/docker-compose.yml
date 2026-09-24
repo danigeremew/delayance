@@ -30,8 +30,22 @@ services:
       timeout: 3s
       retries: 10
 
+  keycloak:
+    # Development-only identity provider; pin upgrades as explicit changes.
+    image: quay.io/keycloak/keycloak:26.7.4
+    container_name: delayance-keycloak
+    command: start-dev
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-change-me-now}
+    ports:
+      - '127.0.0.1:58741:8080'
+    volumes:
+      - keycloak_data:/opt/keycloak/data
+    restart: unless-stopped
+
   minio:
-    image: minio/minio:latest
+    image: quay.io/minio/minio:latest
     container_name: delayance-minio
     command: server /data --console-address ":9001"
     environment:
@@ -50,7 +64,7 @@ services:
       start_period: 10s
 
   minio-init:
-    image: minio/mc:latest
+    image: quay.io/minio/mc:latest
     container_name: delayance-minio-init
     depends_on:
       minio:
@@ -92,3 +106,4 @@ volumes:
   postgres_data:
   redis_data:
   minio_data:
+  keycloak_data:

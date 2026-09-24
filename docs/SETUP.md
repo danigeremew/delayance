@@ -54,9 +54,10 @@ Uses Playwright. Set `PLAYWRIGHT_API_URL` / `PLAYWRIGHT_BASE_URL` if ports diffe
 | Web | http://localhost:48721 |
 | API | http://localhost:48722 |
 | API docs (Swagger) | http://localhost:48722/docs |
+| Keycloak (local development) | http://localhost:58741 |
 | MinIO console | http://localhost:59003 |
 
-Postgres is exposed on host port **58433**, Redis on **64380**, MinIO on **59002/59003** to avoid conflicts with local services.
+Postgres is exposed on host port **58433**, Redis on **64380**, Keycloak on **58741**, and MinIO on **59002/59003** to avoid conflicts with local services. Keycloak is bound to localhost and uses its development-only `dev-file` database for now.
 
 ## AI providers
 
