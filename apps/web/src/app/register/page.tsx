@@ -1,100 +1,106 @@
 'use client';
-
 import Link from 'next/link';
-import { FormEvent, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { apiFetch } from '@/lib/api';
-import { useAuth, User } from '@/lib/auth-context';
+import { useState, type FormEvent } from 'react';
+import { AuthField, AuthShell } from '@/components/auth/auth-shell';
+import { submitAuth, type AuthResult } from '@/lib/auth-forms';
+import { useAuth } from '@/lib/auth-context';
 
 export default function RegisterPage() {
   const router = useRouter();
   const { setAuthSession } = useAuth();
-  const [error, setError] = useState<string | null>(null);
+  const [email, setEmail] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-
-  async function onSubmit(event: FormEvent<HTMLFormElement>) {
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setError('');
+    if (password !== confirmPassword) {
+      setError('Passwords do not match');
+      return;
+    }
     setLoading(true);
-    setError(null);
-    const form = new FormData(event.currentTarget);
     try {
-      const data = await apiFetch<{
-        accessToken: string;
-        refreshToken: string;
-        user: User;
-      }>('/auth/register', {
-        method: 'POST',
-        body: JSON.stringify({
-          name: form.get('name'),
-          email: form.get('email'),
-          password: form.get('password'),
-        }),
+      const result = await submitAuth<AuthResult>('/auth/register', {
+        email,
+        firstName,
+        lastName,
+        password,
+        confirmPassword,
       });
-      setAuthSession({ accessToken: data.accessToken, refreshToken: data.refreshToken }, data.user);
-      router.push('/projects');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Registration failed');
+      setAuthSession(result.accessToken, result.user);
+      router.replace('/projects');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Registration failed');
     } finally {
       setLoading(false);
     }
   }
-
   return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-6 px-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Create account</h1>
-        <p className="mt-1 text-sm text-[var(--dl-muted)]">
-          Join Delayance to organize documents with AI safety gating
-        </p>
-      </div>
-      <form onSubmit={onSubmit} className="flex flex-col gap-3">
-        <label className="flex flex-col gap-1 text-sm font-medium">
-          Full Name
-          <input
-            name="name"
-            required
-            placeholder="Jane Doe"
-            className="rounded border border-[var(--dl-border)] bg-[var(--dl-panel)] px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-[var(--dl-accent)]"
+    <AuthShell
+      title="Create your account"
+      description="Set up your Delayance workspace and start writing."
+    >
+      <form onSubmit={submit}>
+        <div className="registration-fields">
+          <AuthField
+            id="firstName"
+            label="First name"
+            value={firstName}
+            onChange={setFirstName}
+            autoComplete="given-name"
           />
-        </label>
-        <label className="flex flex-col gap-1 text-sm font-medium">
-          Email Address
-          <input
-            name="email"
-            type="email"
-            required
-            placeholder="you@example.com"
-            className="rounded border border-[var(--dl-border)] bg-[var(--dl-panel)] px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-[var(--dl-accent)]"
+          <AuthField
+            id="lastName"
+            label="Last name"
+            value={lastName}
+            onChange={setLastName}
+            autoComplete="family-name"
           />
-        </label>
-        <label className="flex flex-col gap-1 text-sm font-medium">
-          Password
-          <input
-            name="password"
-            type="password"
-            minLength={8}
-            required
-            placeholder="At least 8 characters"
-            className="rounded border border-[var(--dl-border)] bg-[var(--dl-panel)] px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-[var(--dl-accent)]"
-          />
-        </label>
-        {error ? (
-          <div className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300">
-            {error}
+          <div className="full">
+            <AuthField
+              id="email"
+              label="Email"
+              type="email"
+              value={email}
+              onChange={setEmail}
+              autoComplete="email"
+              placeholder="you@yourdomain.com"
+            />
           </div>
-        ) : null}
-        <button
-          type="submit"
-          disabled={loading}
-          className="mt-2 rounded border border-[var(--dl-accent)] bg-[var(--dl-accent)] px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
-        >
-          {loading ? 'Creating…' : 'Create account'}
+          <AuthField
+            id="password"
+            label="Password"
+            type="password"
+            value={password}
+            onChange={setPassword}
+            autoComplete="new-password"
+          />
+          <AuthField
+            id="confirmPassword"
+            label="Confirm password"
+            type="password"
+            value={confirmPassword}
+            onChange={setConfirmPassword}
+            autoComplete="new-password"
+          />
+        </div>
+        {error && (
+          <p className="auth-message" role="alert">
+            {error}
+          </p>
+        )}
+        <button className="primary-btn" type="submit" disabled={loading}>
+          {loading ? 'Creating account…' : 'Create account'}
         </button>
+        <p className="signup">
+          Already registered? <Link href="/login">Sign in</Link>
+        </p>
       </form>
-      <p className="text-sm text-[var(--dl-muted)]">
-        Already registered? <Link href="/login" className="text-[var(--dl-accent)] underline">Sign in</Link>
-      </p>
-    </main>
+    </AuthShell>
   );
 }
-

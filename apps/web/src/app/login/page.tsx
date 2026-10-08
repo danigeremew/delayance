@@ -1,100 +1,71 @@
 'use client';
-
 import Link from 'next/link';
-import { FormEvent, Suspense, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
-import { apiFetch } from '@/lib/api';
-import { useAuth, User } from '@/lib/auth-context';
+import { useRouter } from 'next/navigation';
+import { useState, type FormEvent } from 'react';
+import { AuthField, AuthShell } from '@/components/auth/auth-shell';
+import { submitAuth, type AuthResult } from '@/lib/auth-forms';
+import { useAuth } from '@/lib/auth-context';
 
-function LoginForm() {
+export default function LoginPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const redirectPath = searchParams.get('redirect') ?? '/projects';
   const { setAuthSession } = useAuth();
-
-  const [error, setError] = useState<string | null>(null);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-
-  async function onSubmit(event: FormEvent<HTMLFormElement>) {
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setError('');
     setLoading(true);
-    setError(null);
-    const form = new FormData(event.currentTarget);
     try {
-      const data = await apiFetch<{
-        accessToken: string;
-        refreshToken: string;
-        user: User;
-      }>('/auth/login', {
-        method: 'POST',
-        body: JSON.stringify({
-          email: form.get('email'),
-          password: form.get('password'),
-        }),
-      });
-      setAuthSession({ accessToken: data.accessToken, refreshToken: data.refreshToken }, data.user);
-      router.push(redirectPath);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Login failed');
+      const result = await submitAuth<AuthResult>('/auth/login', { email, password });
+      setAuthSession(result.accessToken, result.user);
+      router.replace('/projects');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Sign in failed');
     } finally {
       setLoading(false);
     }
   }
-
   return (
-    <form onSubmit={onSubmit} className="flex flex-col gap-3">
-      <label className="flex flex-col gap-1 text-sm font-medium">
-        Email
-        <input
-          name="email"
+    <AuthShell
+      title="Welcome back"
+      description="Access your documents, notes, and writing workspace."
+    >
+      <form onSubmit={submit}>
+        <AuthField
+          id="email"
+          label="Email"
           type="email"
-          required
-          placeholder="you@example.com"
-          className="rounded border border-[var(--dl-border)] bg-[var(--dl-panel)] px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-[var(--dl-accent)]"
+          value={email}
+          onChange={setEmail}
+          autoComplete="email"
+          placeholder="you@yourdomain.com"
         />
-      </label>
-      <label className="flex flex-col gap-1 text-sm font-medium">
-        Password
-        <input
-          name="password"
+        <AuthField
+          id="password"
+          label="Password"
           type="password"
-          required
-          placeholder="••••••••"
-          className="rounded border border-[var(--dl-border)] bg-[var(--dl-panel)] px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-[var(--dl-accent)]"
+          value={password}
+          onChange={setPassword}
+          autoComplete="current-password"
+          placeholder="Enter your password"
         />
-      </label>
-      {error ? (
-        <div className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300">
-          {error}
-        </div>
-      ) : null}
-      <button
-        type="submit"
-        disabled={loading}
-        className="mt-2 rounded border border-[var(--dl-accent)] bg-[var(--dl-accent)] px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
-      >
-        {loading ? 'Signing in…' : 'Sign in'}
-      </button>
-    </form>
-  );
-}
-
-export default function LoginPage() {
-  return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-6 px-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Sign in</h1>
-        <p className="mt-1 text-sm text-[var(--dl-muted)]">
-          Welcome back to Delayance AI Document Workspace
+        <Link className="forgot" href="/forgot-password">
+          Forgot password?
+        </Link>
+        {error && (
+          <p className="auth-message" role="alert">
+            {error}
+          </p>
+        )}
+        <button className="primary-btn" type="submit" disabled={loading}>
+          {loading ? 'Signing in…' : 'Sign In'}
+        </button>
+        <p className="signup">
+          New user? <Link href="/register">Create account</Link>
         </p>
-      </div>
-      <Suspense fallback={<div className="text-sm text-[var(--dl-muted)]">Loading…</div>}>
-        <LoginForm />
-      </Suspense>
-      <p className="text-sm text-[var(--dl-muted)]">
-        No account? <Link href="/register" className="text-[var(--dl-accent)] underline">Register</Link>
-      </p>
-    </main>
+      </form>
+    </AuthShell>
   );
 }
-

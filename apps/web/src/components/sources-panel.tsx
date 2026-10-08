@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { apiFetch, API_URL, getAccessToken } from '@/lib/api';
+import { apiFetch } from '@/lib/api';
 
 interface Source {
   id: string;
@@ -80,14 +80,10 @@ export function SourcesPanel({ projectId }: { projectId: string }) {
   const upload = async (file: File) => {
     const form = new FormData();
     form.append('file', file);
-    const token = getAccessToken();
-    const res = await fetch(`${API_URL}/projects/${projectId}/files`, {
+    const data = await apiFetch<{ id: string }>(`/projects/${projectId}/files`, {
       method: 'POST',
-      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
       body: form,
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.message ?? 'Upload failed');
     await apiFetch(`/projects/${projectId}/sources`, {
       method: 'POST',
       body: JSON.stringify({

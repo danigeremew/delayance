@@ -1,0 +1,67 @@
+{
+  "realm": "delayance",
+  "enabled": true,
+  "loginTheme": "keycloak",
+  "registrationAllowed": true,
+  "registrationEmailAsUsername": true,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "rememberMe": true,
+  "accessTokenLifespan": 300,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 604800,
+  "refreshTokenMaxReuse": 0,
+  "clients": [
+    {
+      "clientId": "delayance-api",
+      "name": "Delayance API",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "dev-client-secret-change-me",
+      "redirectUris": [],
+      "webOrigins": ["http://localhost:48721"],
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "publicClient": false,
+      "protocol": "openid-connect",
+      "attributes": {},
+      "protocolMappers": [
+        {
+          "name": "delayance-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "delayance-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "delayance-provisioner",
+      "name": "Delayance account provisioner",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "dev-provisioner-secret-change-me",
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect"
+    }
+  ],
+  "users": [
+    {
+      "username": "service-account-delayance-provisioner",
+      "enabled": true,
+      "serviceAccountClientId": "delayance-provisioner",
+      "clientRoles": {
+        "realm-management": ["manage-users", "view-users"]
+      }
+    }
+  ]
+}

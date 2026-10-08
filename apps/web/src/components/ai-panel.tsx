@@ -14,7 +14,7 @@ const MODES: { id: Mode; label: string; hint: string }[] = [
   { id: 'review', label: 'Review', hint: 'Findings and optional document updates' },
 ];
 
-const FALLBACK_MODELS = ['llama3.2', 'mistral', 'qwen2.5', 'gpt-4o-mini', 'gpt-4o'];
+const GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-2.5-pro'];
 
 interface Chat {
   id: string;
@@ -118,7 +118,12 @@ function IconPlus() {
 function IconClose() {
   return (
     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path
+        d="M6 6l12 12M18 6L6 18"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }
@@ -226,7 +231,6 @@ export function AiPanel({
     policy: string;
     baseUrl?: string | null;
   } | null>(null);
-  const [ollamaModels, setOllamaModels] = useState<string[]>([]);
   const [sources, setSources] = useState<SourceRow[]>([]);
   const [menuOpen, setMenuOpen] = useState<'mode' | 'model' | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -235,9 +239,7 @@ export function AiPanel({
   const bootstrapped = useRef(false);
 
   const loadChats = useCallback(async () => {
-    const list = await apiFetch<Chat[]>(
-      `/projects/${projectId}/documents/${documentId}/ai/chats`,
-    );
+    const list = await apiFetch<Chat[]>(`/projects/${projectId}/documents/${documentId}/ai/chats`);
     setChats(list);
     return list;
   }, [projectId, documentId]);
@@ -268,10 +270,10 @@ export function AiPanel({
   );
 
   const startNewChat = useCallback(async () => {
-    const chat = await apiFetch<Chat>(
-      `/projects/${projectId}/documents/${documentId}/ai/chats`,
-      { method: 'POST', body: JSON.stringify({}) },
-    );
+    const chat = await apiFetch<Chat>(`/projects/${projectId}/documents/${documentId}/ai/chats`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
     await loadChats();
     setActiveChatId(chat.id);
     setOpenTabIds((prev) => [...prev.filter((id) => id !== chat.id), chat.id]);
@@ -308,16 +310,6 @@ export function AiPanel({
         ]);
         setSettings(s);
         setSources(src);
-        if (s.provider === 'ollama') {
-          const q = encodeURIComponent(s.baseUrl || 'http://127.0.0.1:11434/v1');
-          const models = await apiFetch<{
-            ok: boolean;
-            models: { name: string }[];
-          }>(`/ai/ollama/models?baseUrl=${q}`).catch(() => ({ ok: false, models: [] }));
-          setOllamaModels(models.models.map((m) => m.name));
-        } else {
-          setOllamaModels([]);
-        }
         if (!bootstrapped.current) {
           bootstrapped.current = true;
           if (list.length) {
@@ -459,8 +451,7 @@ export function AiPanel({
               if (event.externalProviderWarning) setWarning(event.externalProviderWarning);
               if (event.validation && !event.validation.ok) {
                 setError(
-                  event.validation.errors.join('; ') ||
-                    'AI could not produce valid document ops',
+                  event.validation.errors.join('; ') || 'AI could not produce valid document ops',
                 );
               }
               return;
@@ -476,9 +467,7 @@ export function AiPanel({
 
         if (!opts?.instruction) setInstruction('');
         setActiveChatId(finalChatId);
-        setOpenTabIds((prev) =>
-          prev.includes(finalChatId) ? prev : [...prev, finalChatId],
-        );
+        setOpenTabIds((prev) => (prev.includes(finalChatId) ? prev : [...prev, finalChatId]));
         await Promise.all([loadChats(), loadProposals(finalChatId)]);
 
         if (started) {
@@ -521,9 +510,7 @@ export function AiPanel({
       }
       if (!opts?.instruction) setInstruction('');
       setActiveChatId(res.chatId);
-      setOpenTabIds((prev) =>
-        prev.includes(res.chatId) ? prev : [...prev, res.chatId],
-      );
+      setOpenTabIds((prev) => (prev.includes(res.chatId) ? prev : [...prev, res.chatId]));
       await Promise.all([loadChats(), loadProposals(res.chatId)]);
       if (res.applied) onAccepted();
     } catch (e) {
@@ -539,10 +526,7 @@ export function AiPanel({
     }
   };
 
-  const resolveClarification = async (
-    proposal: Proposal,
-    preferredMode: 'edit' | 'write',
-  ) => {
+  const resolveClarification = async (proposal: Proposal, preferredMode: 'edit' | 'write') => {
     try {
       await apiFetch(`/projects/${projectId}/ai/proposals/${proposal.id}/reject`, {
         method: 'POST',
@@ -597,12 +581,7 @@ export function AiPanel({
     .map((id) => chats.find((c) => c.id === id))
     .filter((c): c is Chat => Boolean(c));
   const modelOptions = Array.from(
-    new Set([
-      ...(settings?.model ? [settings.model] : []),
-      ...(settings?.provider === 'ollama' && ollamaModels.length
-        ? ollamaModels
-        : FALLBACK_MODELS),
-    ]),
+    new Set([...(settings?.model ? [settings.model] : []), ...GEMINI_MODELS]),
   );
 
   return (
@@ -739,8 +718,8 @@ export function AiPanel({
                 {activeChat ? activeChat.title : 'Start writing with AI'}
               </p>
               <p className="dl-ai-empty-copy">
-                Ask a question, edit existing text, or draft new sections. Auto chooses the
-                right mode from your prompt.
+                Ask a question, edit existing text, or draft new sections. Auto chooses the right
+                mode from your prompt.
               </p>
             </div>
           ) : null}

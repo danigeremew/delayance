@@ -36,11 +36,7 @@ export const sectionStatusEnum = pgEnum('section_status', [
   'locked',
 ]);
 
-export const documentStatusEnum = pgEnum('document_status', [
-  'draft',
-  'in_review',
-  'approved',
-]);
+export const documentStatusEnum = pgEnum('document_status', ['draft', 'in_review', 'approved']);
 
 export const documentAnalysisStatusEnum = pgEnum('document_analysis_status', [
   'pending',
@@ -48,16 +44,14 @@ export const documentAnalysisStatusEnum = pgEnum('document_analysis_status', [
   'failed',
 ]);
 
-export const officeSessionPermissionEnum = pgEnum('office_session_permission', [
-  'read',
-  'write',
-]);
+export const officeSessionPermissionEnum = pgEnum('office_session_permission', ['read', 'write']);
 
 export const users = pgTable('users', {
   id: uuid('id').defaultRandom().primaryKey(),
   email: text('email').notNull().unique(),
   name: text('name').notNull(),
-  passwordHash: text('password_hash').notNull(),
+  passwordHash: text('password_hash'),
+  keycloakSubject: text('keycloak_subject').unique(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
@@ -262,12 +256,7 @@ export const officeSessions = pgTable(
   (table) => [index('office_sessions_document_id_idx').on(table.documentId)],
 );
 
-export const jobStatusEnum = pgEnum('job_status', [
-  'queued',
-  'running',
-  'completed',
-  'failed',
-]);
+export const jobStatusEnum = pgEnum('job_status', ['queued', 'running', 'completed', 'failed']);
 
 export const backgroundJobs = pgTable(
   'background_jobs',
@@ -325,10 +314,10 @@ export const projectAiSettings = pgTable('project_ai_settings', {
   projectId: uuid('project_id')
     .primaryKey()
     .references(() => projects.id, { onDelete: 'cascade' }),
-  policy: aiPolicyEnum('policy').default('local_only').notNull(),
-  provider: text('provider').default('ollama').notNull(),
-  model: text('model').default('llama3.2').notNull(),
-  baseUrl: text('base_url').default('http://127.0.0.1:11434/v1'),
+  policy: aiPolicyEnum('policy').default('any').notNull(),
+  provider: text('provider').default('gemini').notNull(),
+  model: text('model').default('gemini-2.5-flash').notNull(),
+  baseUrl: text('base_url'),
   encryptedApiKey: text('encrypted_api_key'),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });

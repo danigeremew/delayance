@@ -14,7 +14,7 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   app.useGlobalFilters(new HttpExceptionFilter());
   app.enableCors({
-    origin: true,
+    origin: configOrigin(),
     credentials: true,
   });
 
@@ -31,3 +31,7 @@ async function bootstrap() {
 }
 
 bootstrap();
+
+function configOrigin() {
+  return process.env.WEB_ORIGIN ?? 'http://localhost:48721';
+}

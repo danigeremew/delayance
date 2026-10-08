@@ -34,7 +34,7 @@ services:
     # Development-only identity provider; pin upgrades as explicit changes.
     image: quay.io/keycloak/keycloak:26.7.4
     container_name: delayance-keycloak
-    command: start-dev
+    command: start-dev --import-realm
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME:-admin}
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-change-me-now}
@@ -42,6 +42,7 @@ services:
       - '127.0.0.1:58741:8080'
     volumes:
       - keycloak_data:/opt/keycloak/data
+      - ./keycloak:/opt/keycloak/data/import:ro
     restart: unless-stopped
 
   minio:

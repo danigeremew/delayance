@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import type { Document } from '@delayance/document-model';
-import { apiFetch, API_URL, getAccessToken } from '@/lib/api';
+import { apiFetch } from '@/lib/api';
 
 export function ImportExportPanel({
   projectId,
@@ -38,14 +38,10 @@ export function ImportExportPanel({
     setPreviewTitle(null);
     const form = new FormData();
     form.append('file', file);
-    const token = getAccessToken();
-    const up = await fetch(`${API_URL}/projects/${projectId}/files`, {
+    const fileRow = await apiFetch<{ id: string }>(`/projects/${projectId}/files`, {
       method: 'POST',
-      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
       body: form,
     });
-    const fileRow = await up.json();
-    if (!up.ok) throw new Error(fileRow.message ?? 'Upload failed');
 
     const started = await apiFetch<{
       import: { id: string };

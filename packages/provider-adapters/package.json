@@ -18,7 +18,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@delayance/ai-core": "workspace:*"
+    "@delayance/ai-core": "workspace:*",
+    "zod": "^3.25.56"
   },
   "devDependencies": {
     "@delayance/eslint-config": "workspace:*",

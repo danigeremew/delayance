@@ -1,29 +1,11 @@
-import {
-  ForbiddenException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { and, count, desc, eq, inArray } from 'drizzle-orm';
 import type { ProjectRole } from '@delayance/shared-types';
 import { DatabaseService } from '../database/database.service';
-import {
-  documents,
-  projectAiSettings,
-  projectMembers,
-  projects,
-  users,
-} from '../database/schema';
+import { documents, projectAiSettings, projectMembers, projects, users } from '../database/schema';
 import { AuditService } from '../rbac/audit.service';
 import { canManageMembers, canManageProject } from '../rbac/roles';
 import { AppConfigService } from '../config/app-config.service';
-import { encryptSecret } from '../crypto/secrets';
-
-const DEFAULT_AI = {
-  provider: 'ollama',
-  model: 'llama3.2',
-  policy: 'local_only' as const,
-  baseUrl: 'http://127.0.0.1:11434/v1',
-};
 
 @Injectable()
 export class ProjectsService {
@@ -61,9 +43,7 @@ export class ProjectsService {
       .where(inArray(documents.projectId, ids))
       .groupBy(documents.projectId);
 
-    const countByProject = new Map(
-      docCounts.map((d) => [d.projectId, Number(d.documentCount)]),
-    );
+    const countByProject = new Map(docCounts.map((d) => [d.projectId, Number(d.documentCount)]));
 
     return rows.map((r) => ({
       ...r,
@@ -76,13 +56,6 @@ export class ProjectsService {
     input: {
       name: string;
       description?: string;
-      ai?: {
-        provider?: string;
-        model: string;
-        policy?: 'any' | 'local_only';
-        baseUrl?: string | null;
-        apiKey?: string | null;
-      };
     },
   ) {
     const [project] = await this.database.db
@@ -101,15 +74,10 @@ export class ProjectsService {
       role: 'owner',
     });
 
-    const ai = input.ai;
-    const provider = ai?.provider ?? DEFAULT_AI.provider;
-    const model = ai?.model ?? DEFAULT_AI.model;
-    const policy = ai?.policy ?? DEFAULT_AI.policy;
-    const baseUrl =
-      ai?.baseUrl === undefined ? DEFAULT_AI.baseUrl : ai.baseUrl;
-    const encryptedApiKey = ai?.apiKey
-      ? encryptSecret(ai.apiKey, this.config.env.SECRETS_ENCRYPTION_KEY)
-      : null;
+    const provider = 'gemini';
+    const model = this.config.env.GEMINI_MODEL;
+    const policy = 'any' as const;
+    const baseUrl = null;
 
     await this.database.db.insert(projectAiSettings).values({
       projectId: project.id,
@@ -117,7 +85,7 @@ export class ProjectsService {
       model,
       policy,
       baseUrl,
-      encryptedApiKey,
+      encryptedApiKey: null,
     });
 
     await this.audit.record({
@@ -214,10 +182,7 @@ export class ProjectsService {
     if (!user) throw new NotFoundException('User not found');
 
     const existing = await this.database.db.query.projectMembers.findFirst({
-      where: and(
-        eq(projectMembers.projectId, projectId),
-        eq(projectMembers.userId, user.id),
-      ),
+      where: and(eq(projectMembers.projectId, projectId), eq(projectMembers.userId, user.id)),
     });
     if (existing) {
       const [updated] = await this.database.db
@@ -268,12 +233,7 @@ export class ProjectsService {
     return updated;
   }
 
-  async removeMember(
-    projectId: string,
-    memberId: string,
-    actorId: string,
-    actorRole: ProjectRole,
-  ) {
+  async removeMember(projectId: string, memberId: string, actorId: string, actorRole: ProjectRole) {
     if (!canManageMembers(actorRole)) {
       throw new ForbiddenException('Only owners can remove members');
     }

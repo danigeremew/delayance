@@ -14,19 +14,12 @@ import {
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { z } from 'zod';
+import { aiSettingsSchema } from '@delayance/validation';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { ProjectRoleGuard, type ProjectRequestUser } from '../rbac/project-role.guard';
 import { RequireProjectRoles } from '../rbac/roles';
 import { AiService } from './ai.service';
-
-const settingsSchema = z.object({
-  policy: z.enum(['any', 'local_only']).optional(),
-  provider: z.string().min(1).optional(),
-  model: z.string().min(1).optional(),
-  baseUrl: z.string().nullable().optional(),
-  apiKey: z.string().nullable().optional(),
-});
 
 const aiRequestSchema = z.object({
   instruction: z.string().min(1).max(20000),
@@ -72,17 +65,14 @@ export class AiController {
   @RequireProjectRoles('editor')
   putSettings(
     @Param('projectId') projectId: string,
-    @Body(new ZodValidationPipe(settingsSchema)) body: z.infer<typeof settingsSchema>,
+    @Body(new ZodValidationPipe(aiSettingsSchema)) body: z.infer<typeof aiSettingsSchema>,
   ) {
     return this.ai.putSettings(projectId, body);
   }
 
   @Get('projects/:projectId/documents/:documentId/ai/chats')
   @RequireProjectRoles('viewer')
-  listChats(
-    @Param('projectId') projectId: string,
-    @Param('documentId') documentId: string,
-  ) {
+  listChats(@Param('projectId') projectId: string, @Param('documentId') documentId: string) {
     return this.ai.listChats(projectId, documentId);
   }
 
@@ -273,10 +263,7 @@ export class AiController {
 
   @Get('projects/:projectId/ai/proposals/:proposalId')
   @RequireProjectRoles('viewer')
-  get(
-    @Param('projectId') projectId: string,
-    @Param('proposalId') proposalId: string,
-  ) {
+  get(@Param('projectId') projectId: string, @Param('proposalId') proposalId: string) {
     return this.ai.getProposal(projectId, proposalId);
   }
 
@@ -297,10 +284,7 @@ export class AiController {
 
   @Post('projects/:projectId/ai/proposals/:proposalId/reject')
   @RequireProjectRoles('contributor')
-  reject(
-    @Param('projectId') projectId: string,
-    @Param('proposalId') proposalId: string,
-  ) {
+  reject(@Param('projectId') projectId: string, @Param('proposalId') proposalId: string) {
     return this.ai.rejectProposal(projectId, proposalId);
   }
 }

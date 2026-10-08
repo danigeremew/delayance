@@ -1,118 +1,96 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:48722';
-
-export function getAccessToken(): string | null {
-  if (typeof window === 'undefined') return null;
-  return localStorage.getItem('accessToken');
+let accessToken: string | null = null;
+let refreshPromise: Promise<string | null> | null = null;
+export function getAccessToken() {
+  return accessToken;
 }
-
-export function setTokens(accessToken: string, refreshToken: string) {
-  localStorage.setItem('accessToken', accessToken);
-  localStorage.setItem('refreshToken', refreshToken);
+export function setTokens(token: string) {
+  accessToken = token;
 }
-
 export function clearTokens() {
-  localStorage.removeItem('accessToken');
-  localStorage.removeItem('refreshToken');
+  accessToken = null;
 }
-
 async function refreshAccessToken(): Promise<string | null> {
-  const refreshToken = localStorage.getItem('refreshToken');
-  if (!refreshToken) return null;
-  const res = await fetch(`${API_URL}/auth/refresh`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ refreshToken }),
+  if (refreshPromise) return refreshPromise;
+  const run = async () => {
+    const response = await fetch(`${API_URL}/auth/refresh`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { Accept: 'application/json' },
+    });
+    if (!response.ok) {
+      accessToken = null;
+      return null;
+    }
+    const data = (await response.json()) as { accessToken: string };
+    accessToken = data.accessToken;
+    return accessToken;
+  };
+  const locked =
+    typeof navigator !== 'undefined' && 'locks' in navigator
+      ? navigator.locks.request('delayance-auth-refresh', () => run()).then((value) => value)
+      : run();
+  refreshPromise = locked.finally(() => {
+    refreshPromise = null;
   });
-  if (!res.ok) return null;
-  const data = await res.json();
-  setTokens(data.accessToken, data.refreshToken);
-  return data.accessToken as string;
+  return refreshPromise;
 }
-
-export async function apiFetch<T = unknown>(
-  path: string,
-  init: RequestInit = {},
-): Promise<T> {
+export async function apiFetch<T = unknown>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
-  if (!headers.has('Content-Type') && init.body) {
+  if (!headers.has('Content-Type') && init.body && !(init.body instanceof FormData))
     headers.set('Content-Type', 'application/json');
-  }
-  let token = getAccessToken();
-  if (token) headers.set('Authorization', `Bearer ${token}`);
-
-  let res = await fetch(`${API_URL}${path}`, { ...init, headers });
-  if (res.status === 401) {
-    token = await refreshAccessToken();
+  if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`);
+  const options = { ...init, headers, credentials: 'include' as RequestCredentials };
+  let res = await fetch(`${API_URL}${path}`, options);
+  if (res.status === 401 && path !== '/auth/refresh') {
+    const token = await refreshAccessToken();
     if (token) {
       headers.set('Authorization', `Bearer ${token}`);
-      res = await fetch(`${API_URL}${path}`, { ...init, headers });
+      res = await fetch(`${API_URL}${path}`, options);
     }
   }
-
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
+  if (!res.ok)
     throw new Error((data as { message?: string }).message ?? `Request failed (${res.status})`);
-  }
   return data as T;
 }
-
-/** Download an authenticated file response without exposing a storage URL to the browser. */
 export async function apiDownload(path: string): Promise<{ blob: Blob; filename: string }> {
   const headers = new Headers();
-  let token = getAccessToken();
-  if (token) headers.set('Authorization', `Bearer ${token}`);
-  let response = await fetch(`${API_URL}${path}`, { headers });
+  if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`);
+  let response = await fetch(`${API_URL}${path}`, { headers, credentials: 'include' });
   if (response.status === 401) {
-    token = await refreshAccessToken();
+    const token = await refreshAccessToken();
     if (token) {
       headers.set('Authorization', `Bearer ${token}`);
-      response = await fetch(`${API_URL}${path}`, { headers });
+      response = await fetch(`${API_URL}${path}`, { headers, credentials: 'include' });
     }
   }
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({}));
-    throw new Error((body as { message?: string }).message ?? `Download failed (${response.status})`);
-  }
+  if (!response.ok) throw new Error(`Download failed (${response.status})`);
   const disposition = response.headers.get('content-disposition') ?? '';
   const filename = /filename="?([^";]+)"?/i.exec(disposition)?.[1] ?? 'document.docx';
   return { blob: await response.blob(), filename };
 }
-
-/** Consume an SSE endpoint that emits `data: {json}\n\n` events. */
 export async function apiFetchSse(
   path: string,
   init: RequestInit,
   onEvent: (event: unknown) => void,
 ): Promise<void> {
   const headers = new Headers(init.headers);
-  if (!headers.has('Content-Type') && init.body) {
-    headers.set('Content-Type', 'application/json');
-  }
+  if (!headers.has('Content-Type') && init.body) headers.set('Content-Type', 'application/json');
   headers.set('Accept', 'text/event-stream');
-  let token = getAccessToken();
-  if (token) headers.set('Authorization', `Bearer ${token}`);
-
-  let res = await fetch(`${API_URL}${path}`, { ...init, headers });
+  if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`);
+  let res = await fetch(`${API_URL}${path}`, { ...init, headers, credentials: 'include' });
   if (res.status === 401) {
-    token = await refreshAccessToken();
+    const token = await refreshAccessToken();
     if (token) {
       headers.set('Authorization', `Bearer ${token}`);
-      res = await fetch(`${API_URL}${path}`, { ...init, headers });
+      res = await fetch(`${API_URL}${path}`, { ...init, headers, credentials: 'include' });
     }
   }
-
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
-    throw new Error(
-      (data as { message?: string }).message ?? `Request failed (${res.status})`,
-    );
-  }
-  if (!res.body) throw new Error('No response body for stream');
-
+  if (!res.ok || !res.body) throw new Error(`Request failed (${res.status})`);
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
-
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -120,65 +98,50 @@ export async function apiFetchSse(
     const parts = buffer.split('\n\n');
     buffer = parts.pop() ?? '';
     for (const part of parts) {
-      const lines = part.split('\n');
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed.startsWith('data:')) continue;
-        const payload = trimmed.slice(5).trim();
-        if (!payload || payload === '[DONE]') continue;
+      const line = part.split('\n').find((v) => v.trim().startsWith('data:'));
+      const payload = line?.trim().slice(5).trim();
+      if (payload && payload !== '[DONE]') {
         try {
           onEvent(JSON.parse(payload));
         } catch {
-          // ignore malformed events
+          /* ignore malformed event */
         }
       }
     }
   }
 }
-
 export async function updateProfileApi(data: { name?: string; email?: string }) {
   return apiFetch<{ id: string; email: string; name: string }>('/auth/profile', {
     method: 'PATCH',
-    body: JSON.stringify(data),
+    body: JSON.stringify({ name: data.name }),
   });
 }
-
-export async function changePasswordApi(data: { currentPassword: string; newPassword: string }) {
-  return apiFetch<{ ok: boolean }>('/auth/change-password', {
-    method: 'POST',
-    body: JSON.stringify(data),
-  });
+export function changePasswordApi(...args: unknown[]) {
+  void args;
+  return Promise.reject(new Error('Password management is handled by Keycloak'));
 }
-
-export async function getSessionsApi() {
-  return apiFetch<Array<{ id: string; createdAt: string; expiresAt: string }>>('/auth/sessions');
+export function getSessionsApi(...args: unknown[]) {
+  void args;
+  return Promise.reject(new Error('Session management is handled by Keycloak'));
 }
-
-export async function revokeSessionApi(sessionId: string) {
-  return apiFetch<{ ok: boolean }>(`/auth/sessions/${sessionId}`, {
-    method: 'DELETE',
-  });
+export function revokeSessionApi(...args: unknown[]) {
+  void args;
+  return Promise.reject(new Error('Session management is handled by Keycloak'));
 }
-
-export async function revokeAllSessionsApi() {
-  return apiFetch<{ ok: boolean }>('/auth/sessions/revoke-all', {
-    method: 'POST',
-  });
+export function revokeAllSessionsApi(...args: unknown[]) {
+  void args;
+  return Promise.reject(new Error('Session management is handled by Keycloak'));
 }
-
 export async function logoutApi() {
-  const refreshToken = localStorage.getItem('refreshToken');
-  if (refreshToken) {
-    try {
-      await apiFetch('/auth/logout', {
-        method: 'POST',
-        body: JSON.stringify({ refreshToken }),
-      });
-    } catch {
-      // ignore network errors on logout
-    }
+  try {
+    const result = (await fetch(`${API_URL}/auth/logout`, {
+      method: 'POST',
+      credentials: 'include',
+    }).then((r) => r.json())) as { logoutUrl?: string };
+    accessToken = null;
+    if (result.logoutUrl && typeof window !== 'undefined') window.location.assign(result.logoutUrl);
+  } catch {
+    accessToken = null;
   }
-  clearTokens();
 }
-
 export { API_URL };

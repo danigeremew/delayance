@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '@/lib/api';
 import { buildOfficeLaunchUrl } from '@/editor/office-launch';
-import { resolveTheme, useWorkspaceStore } from '@/lib/workspace-store';
 import type {
   DocumentLocation,
   EditorAdapter,
@@ -43,17 +42,14 @@ function normalizeUnoArgs(args?: Record<string, unknown>): Record<string, unknow
 
 class LibreOfficeEditorAdapter implements EditorAdapter {
   private state: EditorSaveState = 'loading';
-  private currentTheme: 'dark' | 'light';
   private readonly listeners = new Set<(state: EditorSaveState) => void>();
   private readonly pending = new Map<string, PendingRequest>();
 
   constructor(
     private readonly frame: HTMLIFrameElement,
     private readonly officeOrigin: string,
-    initialTheme: 'dark' | 'light' = 'light',
     private readonly onDocumentLoaded?: () => void,
   ) {
-    this.currentTheme = initialTheme;
   }
 
   openDocument() { return Promise.resolve(); }
@@ -81,11 +77,6 @@ class LibreOfficeEditorAdapter implements EditorAdapter {
       Args: normalizeUnoArgs(command.args),
     });
   }
-  setTheme(theme: 'dark' | 'light') {
-    this.currentTheme = theme;
-    this.send('Action_ChangeTheme', { Theme: theme });
-    this.send('Action_SetTheme', { Theme: theme });
-  }
   subscribe(listener: (state: EditorSaveState) => void) { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   dispose() { for (const pending of this.pending.values()) pending.reject(new Error('Editor disposed')); this.pending.clear(); this.listeners.clear(); }
 
@@ -95,7 +86,6 @@ class LibreOfficeEditorAdapter implements EditorAdapter {
   }
 
   applyCleanUI() {
-    this.setTheme(this.currentTheme);
     this.send('Hide_Sidebar');
     this.send('Action_Hide_Sidebar');
     this.send('Action_HideSidebar');
@@ -103,8 +93,6 @@ class LibreOfficeEditorAdapter implements EditorAdapter {
     this.send('Hide_Toolbar');
     this.send('Hide_Statusbar');
     this.send('Hide_Ruler');
-    this.send('Action_ChangeTheme', { Theme: this.currentTheme });
-    this.send('Action_SetTheme', { Theme: this.currentTheme });
     this.send('Send_UNO_Command', { Command: '.uno:SidebarHide' });
     this.send('Send_UNO_Command', { Command: '.uno:CloseSidebar' });
   }
@@ -190,11 +178,6 @@ export function LibreOfficeEditor({
   const [error, setError] = useState<string | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
 
-  const currentTheme = useWorkspaceStore((state) => state.theme);
-  const resolvedTheme = useMemo(() => resolveTheme(currentTheme), [currentTheme]);
-  const isDark = resolvedTheme === 'dark' || resolvedTheme === 'high-contrast';
-  const uiTheme = isDark ? 'dark' : 'light';
-
   const frameName = useMemo(() => `collabora-${documentId}`, [documentId]);
   const launchUrl = useMemo(() => {
     if (!session) return '';
@@ -214,7 +197,7 @@ export function LibreOfficeEditor({
   useEffect(() => {
     if (!session || !frame.current) return;
     const origin = new URL(session.actionUrl).origin;
-    const adapter = new LibreOfficeEditorAdapter(frame.current, origin, uiTheme, () => setIsLoaded(true));
+    const adapter = new LibreOfficeEditorAdapter(frame.current, origin, () => setIsLoaded(true));
     adapterRef.current = adapter;
     const handler = (event: MessageEvent) => adapter.handleMessage(event);
     window.addEventListener('message', handler);
@@ -228,14 +211,7 @@ export function LibreOfficeEditor({
       if (adapterRef.current === adapter) adapterRef.current = null;
       onAdapter(null);
     };
-  }, [session, onAdapter, onSaveState, uiTheme]);
-
-  // Dynamically update theme in Collabora when Delayance theme changes
-  useEffect(() => {
-    if (adapterRef.current) {
-      adapterRef.current.setTheme(uiTheme);
-    }
-  }, [uiTheme]);
+  }, [session, onAdapter, onSaveState]);
 
   const onLoad = useCallback(() => {
     // The ready message is intentionally sent only after the form target exists.
@@ -261,7 +237,7 @@ export function LibreOfficeEditor({
         <input name="access_token_ttl" value={String(session.accessTokenTtl)} readOnly />
         <input
           name="ui_defaults"
-          value={`UIMode=compact;ShowSidebar=false;TextSidebar=false;Sidebar=false;ShowProperties=false;ShowMenubar=false;ShowToolbar=false;ShowStatusbar=false;ShowRuler=false;TextMenubar=false;TextStatusbar=false;TextRuler=false;UITheme=${uiTheme};darkTheme=${isDark};SaveAsMode=group`}
+          value="UIMode=compact;ShowSidebar=false;TextSidebar=false;Sidebar=false;ShowProperties=false;ShowMenubar=false;ShowToolbar=false;ShowStatusbar=false;ShowRuler=false;TextMenubar=false;TextStatusbar=false;TextRuler=false;UITheme=light;SaveAsMode=group"
           readOnly
         />
       </form>

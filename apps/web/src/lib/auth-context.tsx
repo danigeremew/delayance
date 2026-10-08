@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
-import { apiFetch, clearTokens, getAccessToken, logoutApi, setTokens, updateProfileApi } from './api';
+import { apiFetch, clearTokens, logoutApi, setTokens, updateProfileApi } from './api';
 
 export interface User {
   id: string;
@@ -10,11 +10,10 @@ export interface User {
 }
 
 export interface AuthContextType {
-
   user: User | null;
   loading: boolean;
   isAuthenticated: boolean;
-  setAuthSession: (tokens: { accessToken: string; refreshToken: string }, user: User) => void;
+  setAuthSession: (token: string, user: User) => void;
   logout: () => Promise<void>;
   updateProfile: (data: { name?: string; email?: string }) => Promise<User>;
   refreshUser: () => Promise<void>;
@@ -27,13 +26,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState<boolean>(true);
 
   const refreshUser = useCallback(async () => {
-    const token = getAccessToken();
-    if (!token) {
-      setUser(null);
-      setLoading(false);
-      return;
-    }
-
     try {
       const userData = await apiFetch<User>('/auth/me');
       setUser(userData);
@@ -49,13 +41,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     refreshUser();
   }, [refreshUser]);
 
-  const setAuthSession = useCallback(
-    (tokens: { accessToken: string; refreshToken: string }, userData: User) => {
-      setTokens(tokens.accessToken, tokens.refreshToken);
-      setUser(userData);
-    },
-    [],
-  );
+  const setAuthSession = useCallback((token: string, userData: User) => {
+    setTokens(token);
+    setUser(userData);
+  }, []);
 
   const logout = useCallback(async () => {
     await logoutApi();

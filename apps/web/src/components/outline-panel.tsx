@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import type { Document, DocNode } from '@delayance/document-model';
 import { generateNodeId } from '@delayance/document-model';
 import type { DocumentOperation, NumberingMap } from '@delayance/document-engine';
-import { apiFetch, API_URL, getAccessToken } from '@/lib/api';
+import { apiFetch } from '@/lib/api';
 
 interface Member {
   userId: string;
@@ -18,14 +18,7 @@ interface Assignment {
   status: string;
 }
 
-const STATUSES = [
-  'not_started',
-  'notes',
-  'draft',
-  'needs_review',
-  'approved',
-  'locked',
-] as const;
+const STATUSES = ['not_started', 'notes', 'draft', 'needs_review', 'approved', 'locked'] as const;
 
 export function OutlinePanel({
   projectId,
@@ -48,9 +41,7 @@ export function OutlinePanel({
   useEffect(() => {
     void Promise.all([
       apiFetch<Member[]>(`/projects/${projectId}/members`),
-      apiFetch<Assignment[]>(
-        `/projects/${projectId}/documents/${documentId}/assignments`,
-      ),
+      apiFetch<Assignment[]>(`/projects/${projectId}/documents/${documentId}/assignments`),
     ]).then(([m, a]) => {
       setMembers(m);
       setAssignments(a);
@@ -69,9 +60,7 @@ export function OutlinePanel({
       method: 'POST',
       body: JSON.stringify({ sectionId, ...patch }),
     });
-    setAssignments(
-      await apiFetch(`/projects/${projectId}/documents/${documentId}/assignments`),
-    );
+    setAssignments(await apiFetch(`/projects/${projectId}/documents/${documentId}/assignments`));
     onReload?.();
   };
 
@@ -85,19 +74,13 @@ export function OutlinePanel({
   const importSection = async (sectionId: string, file: File) => {
     const form = new FormData();
     form.append('file', file);
-    const token = getAccessToken();
-    const res = await fetch(
-      `${API_URL}/projects/${projectId}/documents/${documentId}/sections/${sectionId}/import-docx`,
+    await apiFetch(
+      `/projects/${projectId}/documents/${documentId}/sections/${sectionId}/import-docx`,
       {
         method: 'POST',
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
         body: form,
       },
     );
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      throw new Error((data as { message?: string }).message ?? 'Import failed');
-    }
     onReload?.();
   };
 
@@ -138,9 +121,7 @@ export function OutlinePanel({
           const heading = section.children.find((c) => c.type === 'heading');
           const headingId = heading?.id;
           const label =
-            (heading && numbering[heading.id]?.label) ||
-            numbering[section.id]?.label ||
-            'Section';
+            (heading && numbering[heading.id]?.label) || numbering[section.id]?.label || 'Section';
           const assignment = assignments.find((a) => a.sectionId === section.id);
           return (
             <li key={section.id} className="border-b border-[var(--dl-border)] pb-2">
@@ -208,9 +189,7 @@ export function OutlinePanel({
                 <button
                   type="button"
                   className="border border-[var(--dl-border)] px-1"
-                  onClick={() =>
-                    onOperate({ type: 'delete', targetId: section.id, force: true })
-                  }
+                  onClick={() => onOperate({ type: 'delete', targetId: section.id, force: true })}
                 >
                   Delete
                 </button>

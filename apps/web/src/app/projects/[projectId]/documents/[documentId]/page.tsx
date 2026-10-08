@@ -3,9 +3,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
-import { apiDownload, apiFetch, getAccessToken } from '@/lib/api';
+import { apiDownload, apiFetch } from '@/lib/api';
 import { useWorkspaceStore } from '@/lib/workspace-store';
-import { ThemeSwitcher } from '@/components/theme-switcher';
+import { BrandLogo } from '@/components/brand-logo';
 import { SourcesPanel } from '@/components/sources-panel';
 import { HealthPanel } from '@/components/health-panel';
 import { AiPanel } from '@/components/ai-panel';
@@ -41,16 +41,22 @@ export default function WorkspacePage() {
   }, [projectId]);
 
   useEffect(() => {
-    if (!getAccessToken()) { router.push('/login'); return; }
-    void Promise.all([apiFetch<{ title: string }>(`/projects/${projectId}/documents/${documentId}`), loadDocs()])
+    void Promise.all([
+      apiFetch<{ title: string }>(`/projects/${projectId}/documents/${documentId}`),
+      loadDocs(),
+    ])
       .then(([document]) => setTitle(document.title))
-      .catch((cause) => setError(cause instanceof Error ? cause.message : 'Failed to load document'));
+      .catch((cause) =>
+        setError(cause instanceof Error ? cause.message : 'Failed to load document'),
+      );
   }, [projectId, documentId, router, loadDocs]);
 
   const setAdapter = useCallback((adapter: EditorAdapter | null) => setEditor(adapter), []);
   const download = useCallback(async () => {
     try {
-      const { blob, filename } = await apiDownload(`/projects/${projectId}/documents/${documentId}/office/download`);
+      const { blob, filename } = await apiDownload(
+        `/projects/${projectId}/documents/${documentId}/office/download`,
+      );
       const url = URL.createObjectURL(blob);
       const link = window.document.createElement('a');
       link.href = url;
@@ -62,47 +68,143 @@ export default function WorkspacePage() {
     }
   }, [projectId, documentId]);
 
-  return <div className="flex h-screen flex-col bg-[var(--dl-bg)] text-[var(--dl-fg)]">
-    <header className="dl-app-topbar"><div className="dl-app-topbar-main">
-      <Link href="/projects" className="dl-app-topbar-back" title="Back to projects">←</Link>
-      <div className="dl-doc-icon" aria-hidden="true">▤</div>
-      <div className="dl-app-topbar-title-block">
-        <div className="dl-app-topbar-title-row">
-          <h1 className="dl-app-topbar-title">{title}</h1>
-          <span className="dl-app-topbar-status">{saveState}</span>
-        </div>
-        <EditorMenubar editor={editor} onDownload={download} />
-      </div>
-      <div className="dl-app-topbar-actions"><button type="button" className="dl-topbar-btn" onClick={() => void editor?.save()}>Save</button><button type="button" className="dl-topbar-btn" onClick={() => setLeftOpen(!leftOpen)}>Tools</button><button type="button" className="dl-topbar-btn" onClick={() => setRightOpen(!rightOpen)}>AI</button><ThemeSwitcher /></div>
-    </div></header>
-    {error ? <div className="border-b border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</div> : null}
-    <div className="flex min-h-0 flex-1">
-      {leftOpen ? <aside className="relative flex shrink-0 flex-col border-r border-[var(--dl-border)] bg-[var(--dl-panel)]" style={{ width: leftWidth }}><LeftSidebarShell leftTab={leftTab} onTabChange={setLeftTab} onCollapse={() => setLeftOpen(false)}>
-        {leftTab === 'documents' ? <DocumentsList projectId={projectId} documentId={documentId} docs={docs} onRefreshDocs={() => void loadDocs()} /> : null}
-        {leftTab === 'outline' ? <OfficeOutlinePanel projectId={projectId} documentId={documentId} editor={editor} /> : null}
-        {leftTab === 'sources' ? <SourcesPanel projectId={projectId} /> : null}
-        {leftTab === 'memory' ? <p className="dl-tools-empty">Edit project memory from the <Link href={`/projects/${projectId}`}>project hub</Link>.</p> : null}
-        {leftTab === 'health' ? <HealthPanel projectId={projectId} documentId={documentId} /> : null}
-        {leftTab === 'comments' ? (
-          <div className="flex flex-col gap-3 p-3 text-sm">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-[var(--dl-muted)]">Document Comments</h3>
-            <p className="text-xs text-[var(--dl-muted)]">Add and review inline comments inside the document.</p>
+  return (
+    <div className="flex h-screen flex-col bg-[var(--dl-bg)] text-[var(--dl-fg)]">
+      <header className="dl-app-topbar">
+        <div className="dl-app-topbar-main">
+          <Link href="/projects" className="dl-app-topbar-back" title="Back to projects">
+            ←
+          </Link>
+          <BrandLogo href="/projects" className="dl-app-brand" />
+          <div className="dl-doc-icon" aria-hidden="true">
+            ▤
+          </div>
+          <div className="dl-app-topbar-title-block">
+            <div className="dl-app-topbar-title-row">
+              <h1 className="dl-app-topbar-title">{title}</h1>
+              <span className="dl-app-topbar-status">{saveState}</span>
+            </div>
+            <EditorMenubar editor={editor} onDownload={download} />
+          </div>
+          <div className="dl-app-topbar-actions">
+            <button type="button" className="dl-topbar-btn" onClick={() => void editor?.save()}>
+              Save
+            </button>
+            <button type="button" className="dl-topbar-btn" onClick={() => setLeftOpen(!leftOpen)}>
+              Tools
+            </button>
             <button
               type="button"
-              className="rounded border border-[var(--dl-border)] bg-[var(--dl-bg)] px-3 py-1.5 text-xs hover:bg-[color-mix(in_srgb,var(--dl-fg)_6%,transparent)]"
-              onClick={() => void editor?.executeCommand({ type: 'uno', command: '.uno:InsertAnnotation' })}
+              className="dl-topbar-btn"
+              onClick={() => setRightOpen(!rightOpen)}
             >
-              + Insert Comment at Selection
+              AI
             </button>
           </div>
+        </div>
+      </header>
+      {error ? (
+        <div className="border-b border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800">
+          {error}
+        </div>
+      ) : null}
+      <div className="flex min-h-0 flex-1">
+        {leftOpen ? (
+          <aside
+            className="relative flex shrink-0 flex-col border-r border-[var(--dl-border)] bg-[var(--dl-panel)]"
+            style={{ width: leftWidth }}
+          >
+            <LeftSidebarShell
+              leftTab={leftTab}
+              onTabChange={setLeftTab}
+              onCollapse={() => setLeftOpen(false)}
+            >
+              {leftTab === 'documents' ? (
+                <DocumentsList
+                  projectId={projectId}
+                  documentId={documentId}
+                  docs={docs}
+                  onRefreshDocs={() => void loadDocs()}
+                />
+              ) : null}
+              {leftTab === 'outline' ? (
+                <OfficeOutlinePanel projectId={projectId} documentId={documentId} editor={editor} />
+              ) : null}
+              {leftTab === 'sources' ? <SourcesPanel projectId={projectId} /> : null}
+              {leftTab === 'memory' ? (
+                <p className="dl-tools-empty">
+                  Edit project memory from the{' '}
+                  <Link href={`/projects/${projectId}`}>project hub</Link>.
+                </p>
+              ) : null}
+              {leftTab === 'health' ? (
+                <HealthPanel projectId={projectId} documentId={documentId} />
+              ) : null}
+              {leftTab === 'comments' ? (
+                <div className="flex flex-col gap-3 p-3 text-sm">
+                  <h3 className="text-xs font-semibold uppercase tracking-wider text-[var(--dl-muted)]">
+                    Document Comments
+                  </h3>
+                  <p className="text-xs text-[var(--dl-muted)]">
+                    Add and review inline comments inside the document.
+                  </p>
+                  <button
+                    type="button"
+                    className="rounded border border-[var(--dl-border)] bg-[var(--dl-bg)] px-3 py-1.5 text-xs hover:bg-[color-mix(in_srgb,var(--dl-fg)_6%,transparent)]"
+                    onClick={() =>
+                      void editor?.executeCommand({ type: 'uno', command: '.uno:InsertAnnotation' })
+                    }
+                  >
+                    + Insert Comment at Selection
+                  </button>
+                </div>
+              ) : null}
+              {leftTab === 'layout' ? <LayoutPanel editor={editor} /> : null}
+              {leftTab === 'io' ? (
+                <button
+                  type="button"
+                  className="border border-[var(--dl-border)] px-2 py-1 text-left text-sm"
+                  onClick={() => void download()}
+                >
+                  Download DOCX
+                </button>
+              ) : null}
+            </LeftSidebarShell>
+            <SidebarResizeHandle side="left" onResize={setLeftWidth} />
+          </aside>
         ) : null}
-        {leftTab === 'layout' ? <LayoutPanel editor={editor} /> : null}
-        {leftTab === 'io' ? <button type="button" className="border border-[var(--dl-border)] px-2 py-1 text-left text-sm" onClick={() => void download()}>Download DOCX</button> : null}
-      </LeftSidebarShell><SidebarResizeHandle side="left" onResize={setLeftWidth} /></aside> : null}
-      <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <LibreOfficeEditor projectId={projectId} documentId={documentId} onAdapter={setAdapter} onSaveState={setSaveState} />
-      </main>
-      {rightOpen ? <aside className="dl-ai-sidebar relative flex shrink-0 flex-col border-l border-[var(--dl-border)] bg-[var(--dl-panel)]" style={{ width: rightWidth }}><SidebarResizeHandle side="right" onResize={setRightWidth} /><AiPanel projectId={projectId} documentId={documentId} selectedNodeId={null} onCollapse={() => setRightOpen(false)} onStreamStart={() => undefined} onStreamToken={() => undefined} onStreamFinish={() => undefined} onStreamAbort={() => undefined} onAccepted={() => setError('AI document mutations are being migrated to the LibreOffice bridge. Ask and Review remain available.')} /></aside> : null}
+        <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          <LibreOfficeEditor
+            projectId={projectId}
+            documentId={documentId}
+            onAdapter={setAdapter}
+            onSaveState={setSaveState}
+          />
+        </main>
+        {rightOpen ? (
+          <aside
+            className="dl-ai-sidebar relative flex shrink-0 flex-col border-l border-[var(--dl-border)] bg-[var(--dl-panel)]"
+            style={{ width: rightWidth }}
+          >
+            <SidebarResizeHandle side="right" onResize={setRightWidth} />
+            <AiPanel
+              projectId={projectId}
+              documentId={documentId}
+              selectedNodeId={null}
+              onCollapse={() => setRightOpen(false)}
+              onStreamStart={() => undefined}
+              onStreamToken={() => undefined}
+              onStreamFinish={() => undefined}
+              onStreamAbort={() => undefined}
+              onAccepted={() =>
+                setError(
+                  'AI document mutations are being migrated to the LibreOffice bridge. Ask and Review remain available.',
+                )
+              }
+            />
+          </aside>
+        ) : null}
+      </div>
     </div>
-  </div>;
+  );
 }

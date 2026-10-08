@@ -8,31 +8,34 @@ Applications may run as separate processes but share one codebase with clear pac
 
 ## Applications
 
-| App | Role |
-| --- | --- |
-| `apps/web` | Next.js UI |
-| `apps/api` | NestJS REST API (+ WebSockets later) |
-| `apps/worker` | BullMQ background jobs |
+| App                  | Role                                         |
+| -------------------- | -------------------------------------------- |
+| `apps/web`           | Next.js UI                                   |
+| `apps/api`           | NestJS REST API (+ WebSockets later)         |
+| `apps/worker`        | BullMQ background jobs                       |
 | `apps/collaboration` | Placeholder for future Yjs real-time editing |
 
 ## Packages
 
-| Package | Role |
-| --- | --- |
-| `document-model` | Versioned document-analysis schema for AI, search, outline, and health |
-| `document-engine` | Analysis traversal, citation/reference checks, health rules, and locations |
-| `docx-engine` | DOCX analysis extraction, compatibility inspection, and blank-DOCX creation |
-| `ai-core` | Provider-independent prompts, context packing, op validation |
-| `provider-adapters` | OpenAI, Ollama, OpenAI-compatible (+ thin Anthropic/Gemini/OpenRouter stubs) |
-| `design-system` | App theme tokens (separate from document template styles) |
-| `shared-types` | Cross-cutting TypeScript types |
-| `validation` | Shared Zod schemas |
+| Package             | Role                                                                        |
+| ------------------- | --------------------------------------------------------------------------- |
+| `document-model`    | Versioned document-analysis schema for AI, search, outline, and health      |
+| `document-engine`   | Analysis traversal, citation/reference checks, health rules, and locations  |
+| `docx-engine`       | DOCX analysis extraction, compatibility inspection, and blank-DOCX creation |
+| `ai-core`           | Provider-independent prompts, context packing, op validation                |
+| `provider-adapters` | Gemini text, structured output, and streaming adapter                       |
+| `design-system`     | App theme tokens (separate from document template styles)                   |
+| `shared-types`      | Cross-cutting TypeScript types                                              |
+| `validation`        | Shared Zod schemas                                                          |
 
 ## Data plane
 
 - **PostgreSQL** (+ JSONB, pgvector) — relational metadata, analysis, and workflow state
 - **Redis** — BullMQ queues, rate limiting
 - **MinIO** — S3-compatible object storage for files
+- **Keycloak** — identity authority; the API brokers password grants, verifies access tokens, and maps Keycloak subjects to local user UUIDs. A separate restricted service account creates users and resets passwords
+
+Protected routes return HTTP 401 when a bearer token is missing so the web client can restore its session using the refresh cookie. The home dashboard waits for this session check before requesting projects.
 
 ## Core rules
 

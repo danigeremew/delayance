@@ -1,8 +1,8 @@
 import type { Metadata } from 'next';
 import { Plus_Jakarta_Sans } from 'next/font/google';
-import { ThemeProvider } from '@/components/theme-provider';
 import { AuthProvider } from '@/lib/auth-context';
 import './globals.css';
+import './auth-pages.css';
 
 const sans = Plus_Jakarta_Sans({
   subsets: ['latin'],
@@ -13,20 +13,24 @@ const sans = Plus_Jakarta_Sans({
 export const metadata: Metadata = {
   title: 'Delayance',
   description: 'AI Document Workspace',
+  icons: {
+    icon: '/favicon.ico',
+    shortcut: '/favicon.ico',
+    apple: '/delayance-logo.png',
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" data-theme="light" className={sans.variable} suppressHydrationWarning>
+    <html lang="en" className={sans.variable}>
       <body
         className={`${sans.className} min-h-screen bg-[var(--dl-bg)] text-[var(--dl-fg)] antialiased`}
         suppressHydrationWarning
       >
         <AuthProvider>
-          <ThemeProvider>{children}</ThemeProvider>
+          {children}
         </AuthProvider>
       </body>
     </html>
   );
 }
-

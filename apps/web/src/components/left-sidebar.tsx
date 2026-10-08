@@ -5,7 +5,6 @@ import Link from 'next/link';
 import { LEFT_TABS, type LeftTab } from '@/lib/workspace-store';
 import { UserMenu } from '@/components/user-menu';
 
-
 const TAB_ICONS: Record<LeftTab, ReactNode> = {
   documents: (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -71,7 +70,13 @@ const TAB_ICONS: Record<LeftTab, ReactNode> = {
   ),
   layout: (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      <path
+        d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   ),
   io: (
@@ -129,7 +134,6 @@ export function LeftSidebarShell({
         <div className="mt-auto pt-4 pb-2 flex justify-center">
           <UserMenu />
         </div>
-
       </nav>
       <div className="dl-tools-panel">
         <div className="dl-tools-panel-header">
@@ -172,7 +176,7 @@ export function LeftSidebarShell({
 
 import { useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { apiFetch, API_URL, getAccessToken } from '@/lib/api';
+import { apiFetch } from '@/lib/api';
 
 export function DocumentsList({
   projectId,
@@ -219,14 +223,13 @@ export function DocumentsList({
     try {
       const form = new FormData();
       form.append('file', file);
-      const token = getAccessToken();
-      const upRes = await fetch(`${API_URL}/projects/${projectId}/documents/office-import`, {
-        method: 'POST',
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-        body: form,
-      });
-      const doc = await upRes.json();
-      if (!upRes.ok) throw new Error(doc.message ?? 'Import failed');
+      const doc = await apiFetch<{ id?: string }>(
+        `/projects/${projectId}/documents/office-import`,
+        {
+          method: 'POST',
+          body: form,
+        },
+      );
 
       setImportStatus('Import complete! LibreOffice is ready.');
       if (onRefreshDocs) onRefreshDocs();
@@ -252,7 +255,12 @@ export function DocumentsList({
           className="flex-1 flex items-center justify-center gap-1.5 rounded border border-[var(--dl-border)] bg-[var(--dl-bg)] px-2.5 py-1.5 text-xs font-medium text-[var(--dl-fg)] hover:bg-[var(--dl-panel)] disabled:opacity-50"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+            <path
+              d="M12 5v14M5 12h14"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+            />
           </svg>
           {creating ? 'Creating…' : 'New Doc'}
         </button>
@@ -265,7 +273,13 @@ export function DocumentsList({
           title="Import document into project"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path d="M12 3v12M8 11l4 4 4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            <path
+              d="M12 3v12M8 11l4 4 4-4"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
             <path d="M4 19h16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
           </svg>
           {importing ? 'Importing…' : 'Import'}
@@ -281,7 +295,7 @@ export function DocumentsList({
       </div>
 
       {importing && importStatus ? (
-        <div className="rounded border border-blue-200 bg-blue-50 p-2 text-xs text-blue-700 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-300">
+        <div className="rounded border border-blue-200 bg-blue-50 p-2 text-xs text-blue-700">
           <p className="flex items-center gap-1.5">
             <span className="inline-block animate-spin">⏳</span> {importStatus}
           </p>
@@ -289,7 +303,7 @@ export function DocumentsList({
       ) : null}
 
       {error ? (
-        <div className="rounded border border-red-200 bg-red-50 p-2 text-xs text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300">
+        <div className="rounded border border-red-200 bg-red-50 p-2 text-xs text-red-700">
           {error}
         </div>
       ) : null}

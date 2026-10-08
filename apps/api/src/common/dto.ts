@@ -1,18 +1,11 @@
 import { z } from 'zod';
 
-export const createProjectAiSchema = z.object({
-  provider: z.string().min(1).default('ollama'),
-  model: z.string().min(1),
-  policy: z.enum(['any', 'local_only']).default('local_only'),
-  baseUrl: z.string().nullable().optional(),
-  apiKey: z.string().nullable().optional(),
-});
-
-export const createProjectSchema = z.object({
-  name: z.string().min(1).max(200),
-  description: z.string().max(5000).optional().default(''),
-  ai: createProjectAiSchema.optional(),
-});
+export const createProjectSchema = z
+  .object({
+    name: z.string().min(1).max(200),
+    description: z.string().max(5000).optional().default(''),
+  })
+  .strict();
 
 export const updateProjectSchema = z.object({
   name: z.string().min(1).max(200).optional(),
@@ -71,12 +64,5 @@ export const createCommentSchema = z.object({
 export const upsertAssignmentSchema = z.object({
   sectionId: z.string().min(1),
   assigneeId: z.string().uuid().nullable().optional(),
-  status: z.enum([
-    'not_started',
-    'notes',
-    'draft',
-    'needs_review',
-    'approved',
-    'locked',
-  ]),
+  status: z.enum(['not_started', 'notes', 'draft', 'needs_review', 'approved', 'locked']),
 });

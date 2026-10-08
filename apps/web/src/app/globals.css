@@ -190,36 +190,36 @@ body {
 }
 
 /* ── Task list (checkbox items) ────────────────── */
-.prose-doc ul[data-type="taskList"] {
+.prose-doc ul[data-type='taskList'] {
   list-style: none;
   padding-left: 0;
 }
 
-.prose-doc ul[data-type="taskList"] li {
+.prose-doc ul[data-type='taskList'] li {
   display: flex;
   align-items: flex-start;
   gap: 0.5rem;
   padding: 0.15rem 0;
 }
 
-.prose-doc ul[data-type="taskList"] li > label {
+.prose-doc ul[data-type='taskList'] li > label {
   flex-shrink: 0;
   margin-top: 0.2em;
   cursor: pointer;
 }
 
-.prose-doc ul[data-type="taskList"] li > label input[type="checkbox"] {
+.prose-doc ul[data-type='taskList'] li > label input[type='checkbox'] {
   width: 15px;
   height: 15px;
   accent-color: var(--dl-accent);
   cursor: pointer;
 }
 
-.prose-doc ul[data-type="taskList"] li > div {
+.prose-doc ul[data-type='taskList'] li > div {
   flex: 1;
 }
 
-.prose-doc ul[data-type="taskList"] li[data-checked="true"] > div {
+.prose-doc ul[data-type='taskList'] li[data-checked='true'] > div {
   text-decoration: line-through;
   opacity: 0.55;
 }
@@ -286,6 +286,24 @@ body {
   flex-shrink: 0;
   margin-top: 0.1rem;
   line-height: 0;
+}
+
+.dl-app-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-shrink: 0;
+  margin-top: 0.1rem;
+  color: var(--dl-fg);
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.dl-app-brand .dl-brand-logo-image {
+  width: 1.6rem;
+  height: 1.6rem;
+  border-radius: 0.35rem;
 }
 
 .dl-app-topbar-title-block {
@@ -663,14 +681,13 @@ body {
   position: relative;
   flex: 1;
   min-width: 0;
-  background:
-    repeating-linear-gradient(
-      to right,
-      transparent 0,
-      transparent calc(6.25% - 1px),
-      color-mix(in srgb, var(--dl-muted) 35%, transparent) calc(6.25% - 1px),
-      color-mix(in srgb, var(--dl-muted) 35%, transparent) 6.25%
-    );
+  background: repeating-linear-gradient(
+    to right,
+    transparent 0,
+    transparent calc(6.25% - 1px),
+    color-mix(in srgb, var(--dl-muted) 35%, transparent) calc(6.25% - 1px),
+    color-mix(in srgb, var(--dl-muted) 35%, transparent) 6.25%
+  );
 }
 
 .dl-ruler-tick {
@@ -735,12 +752,11 @@ body {
   gap: 0.75rem;
   padding: 0.9rem 1rem 0.75rem;
   border-bottom: 1px solid var(--dl-border);
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--dl-bg) 55%, transparent),
-      transparent
-    );
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--dl-bg) 55%, transparent),
+    transparent
+  );
 }
 
 .dl-ai-header-title {
@@ -1479,8 +1495,16 @@ body {
 .dl-home {
   min-height: 100vh;
   background:
-    radial-gradient(ellipse 80% 50% at 10% -10%, color-mix(in srgb, var(--dl-accent) 12%, transparent), transparent 55%),
-    radial-gradient(ellipse 60% 40% at 100% 0%, color-mix(in srgb, var(--dl-border) 80%, transparent), transparent 50%),
+    radial-gradient(
+      ellipse 80% 50% at 10% -10%,
+      color-mix(in srgb, var(--dl-accent) 12%, transparent),
+      transparent 55%
+    ),
+    radial-gradient(
+      ellipse 60% 40% at 100% 0%,
+      color-mix(in srgb, var(--dl-border) 80%, transparent),
+      transparent 50%
+    ),
     var(--dl-bg);
 }
 
@@ -1505,10 +1529,45 @@ body {
 }
 
 .dl-home-logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
   font-size: 1.15rem;
   font-weight: 700;
   letter-spacing: -0.02em;
   color: var(--dl-fg);
+  text-decoration: none;
+}
+
+.dl-brand-logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--dl-fg);
+  text-decoration: none;
+}
+
+.dl-auth-brand {
+  align-self: center;
+  font-size: 1.4rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+
+.dl-brand-logo-image {
+  width: 2rem;
+  height: 2rem;
+  flex: 0 0 auto;
+  object-fit: contain;
+  border-radius: 0.5rem;
+}
+
+.dl-account-brand {
+  display: inline-flex;
+  align-items: center;
+  color: var(--dl-fg);
+  font-size: 0.95rem;
+  font-weight: 700;
   text-decoration: none;
 }
 
@@ -1530,21 +1589,6 @@ body {
   max-width: 68rem;
   margin: 0 auto;
   padding: 2rem 1.5rem 4rem;
-}
-
-.dl-landing {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  min-height: calc(100vh - 4rem);
-  max-width: 36rem;
-}
-
-.dl-landing-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-  margin-top: 0.5rem;
 }
 
 .dl-home-hero {

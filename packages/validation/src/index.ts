@@ -1,14 +1,45 @@
 import { z } from 'zod';
 
+export const geminiModelSchema = z
+  .string()
+  .trim()
+  .regex(/^gemini-[a-zA-Z0-9._-]+$/, 'Use a Gemini model ID');
+
+export const aiSettingsSchema = z
+  .object({
+    provider: z.literal('gemini').optional(),
+    model: geminiModelSchema.optional(),
+    policy: z.enum(['any', 'local_only']).optional(),
+    apiKey: z.string().trim().min(1).nullable().optional(),
+  })
+  .strict();
+
 export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  GEMINI_API_KEY: z.string().trim().optional(),
+  GEMINI_MODEL: geminiModelSchema.default('gemini-2.5-flash'),
   API_PORT: z.coerce.number().default(48722),
   DATABASE_URL: z.string().min(1),
   REDIS_URL: z.string().min(1),
-  JWT_ACCESS_SECRET: z.string().min(32),
-  JWT_REFRESH_SECRET: z.string().min(32),
-  JWT_ACCESS_EXPIRES_IN: z.string().default('15m'),
-  JWT_REFRESH_EXPIRES_IN: z.string().default('7d'),
+  KEYCLOAK_BASE_URL: z.string().url().default('http://localhost:58741'),
+  KEYCLOAK_ISSUER_URL: z.string().url().default('http://localhost:58741/realms/delayance'),
+  KEYCLOAK_REALM: z.string().default('delayance'),
+  KEYCLOAK_CLIENT_ID: z.string().default('delayance-api'),
+  KEYCLOAK_CLIENT_SECRET: z.string().default('dev-client-secret-change-me'),
+  KEYCLOAK_PROVISIONER_CLIENT_ID: z.string().default('delayance-provisioner'),
+  KEYCLOAK_PROVISIONER_CLIENT_SECRET: z.string().default('dev-provisioner-secret-change-me'),
+  SMTP_HOST: z.string().optional(),
+  SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(587),
+  SMTP_USER: z.string().optional(),
+  SMTP_PASSWORD: z.string().optional(),
+  SMTP_FROM: z.preprocess(
+    (value) => (value === '' ? undefined : value),
+    z.string().email().optional(),
+  ),
+  SMTP_SECURE: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
   SECRETS_ENCRYPTION_KEY: z
     .string()
     .length(64)
@@ -42,31 +73,39 @@ export function parseEnv(env: Record<string, string | undefined> = process.env):
   return envSchema.parse(env);
 }
 
-export const registerSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(8).max(128),
-  name: z.string().min(1).max(200),
-});
-
-export const loginSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(1),
-});
-
-export const refreshSchema = z.object({
-  refreshToken: z.string().min(1),
-});
-
 export const updateProfileSchema = z.object({
   name: z.string().min(1).max(200).optional(),
-  email: z.string().email().optional(),
 });
 
-export const changePasswordSchema = z.object({
-  currentPassword: z.string().min(1),
-  newPassword: z.string().min(8).max(128),
-});
+const email = z
+  .string()
+  .trim()
+  .email()
+  .max(320)
+  .transform((value) => value.toLowerCase());
+const password = z.string().min(8).max(256);
 
-export const revokeSessionSchema = z.object({
-  sessionId: z.string().uuid(),
-});
+export const loginSchema = z.object({ email, password: z.string().min(1) });
+export const registerSchema = z
+  .object({
+    email,
+    firstName: z.string().trim().min(1).max(100),
+    lastName: z.string().trim().min(1).max(100),
+    password,
+    confirmPassword: z.string(),
+  })
+  .refine((value) => value.password === value.confirmPassword, {
+    message: 'Passwords do not match',
+    path: ['confirmPassword'],
+  });
+export const forgotPasswordSchema = z.object({ email });
+export const resetPasswordSchema = z
+  .object({
+    token: z.string().min(32).max(256),
+    password,
+    confirmPassword: z.string(),
+  })
+  .refine((value) => value.password === value.confirmPassword, {
+    message: 'Passwords do not match',
+    path: ['confirmPassword'],
+  });

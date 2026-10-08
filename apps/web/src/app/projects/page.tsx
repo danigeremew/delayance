@@ -3,8 +3,12 @@
 import Link from 'next/link';
 import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { apiFetch, clearTokens, getAccessToken } from '@/lib/api';
-import { ThemeSwitcher } from '@/components/theme-switcher';
+import { apiFetch } from '@/lib/api';
+import { BrandLogo } from '@/components/brand-logo';
+import { useAuth } from '@/lib/auth-context';
+import { UserMenu } from '@/components/user-menu';
+import { DashboardIcon, WorkspaceIllustration } from '@/components/dashboard-visuals';
+import './dashboard.css';
 
 interface ProjectRow {
   id: string;
@@ -14,15 +18,6 @@ interface ProjectRow {
   updatedAt: string;
   documentCount: number;
 }
-
-interface OllamaModelsResponse {
-  ok: boolean;
-  models: { name: string; size: number; modifiedAt: string | null }[];
-  error?: string;
-  baseUrl: string;
-}
-
-const DEFAULT_BASE = 'http://127.0.0.1:11434/v1';
 
 function formatRelative(iso: string) {
   const t = new Date(iso).getTime();
@@ -40,6 +35,7 @@ function formatRelative(iso: string) {
 
 export default function ProjectsHomePage() {
   const router = useRouter();
+  const { loading: authLoading, isAuthenticated } = useAuth();
   const [projects, setProjects] = useState<ProjectRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
@@ -47,68 +43,27 @@ export default function ProjectsHomePage() {
 
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [aiModel, setAiModel] = useState('');
-  const [aiPolicy, setAiPolicy] = useState<'local_only' | 'any'>('local_only');
-  const [aiBaseUrl, setAiBaseUrl] = useState(DEFAULT_BASE);
-  const [ollama, setOllama] = useState<OllamaModelsResponse | null>(null);
-  const [loadingModels, setLoadingModels] = useState(false);
-
   const load = useCallback(async () => {
     try {
-      if (!getAccessToken()) {
-        router.replace('/login');
-        return;
-      }
       const data = await apiFetch<ProjectRow[]>('/projects');
       setProjects(data);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load');
-      setProjects([]);
-    }
-  }, [router]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  const loadOllamaModels = useCallback(async (baseUrl: string) => {
-    setLoadingModels(true);
-    try {
-      const q = encodeURIComponent(baseUrl);
-      const data = await apiFetch<OllamaModelsResponse>(`/ai/ollama/models?baseUrl=${q}`);
-      setOllama(data);
-      if (data.models.length) {
-        setAiModel((prev) =>
-          prev && data.models.some((m) => m.name === prev) ? prev : data.models[0]!.name,
-        );
-      } else {
-        setAiModel('');
-      }
-    } catch (err) {
-      setOllama({
-        ok: false,
-        models: [],
-        baseUrl,
-        error: err instanceof Error ? err.message : 'Failed to load models',
-      });
-      setAiModel('');
-    } finally {
-      setLoadingModels(false);
     }
   }, []);
 
   useEffect(() => {
-    if (!createOpen) return;
-    void loadOllamaModels(aiBaseUrl);
-  }, [createOpen, aiBaseUrl, loadOllamaModels]);
+    if (authLoading) return;
+    if (!isAuthenticated) {
+      router.replace('/login');
+      return;
+    }
+    void load();
+  }, [authLoading, isAuthenticated, load, router]);
 
   async function onCreate(e: FormEvent) {
     e.preventDefault();
-    if (!aiModel) {
-      setError('Select an Ollama model (install one with `ollama pull …` if the list is empty).');
-      return;
-    }
     setCreating(true);
     setError(null);
     try {
@@ -117,12 +72,6 @@ export default function ProjectsHomePage() {
         body: JSON.stringify({
           name,
           description,
-          ai: {
-            provider: 'ollama',
-            model: aiModel,
-            policy: aiPolicy,
-            baseUrl: aiBaseUrl || DEFAULT_BASE,
-          },
         }),
       });
       setCreateOpen(false);
@@ -137,121 +86,124 @@ export default function ProjectsHomePage() {
   }
 
   const totalDocs = projects?.reduce((n, p) => n + (p.documentCount ?? 0), 0) ?? 0;
+  const recentProjects = [...(projects ?? [])].sort(
+    (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+  );
+  const openCreate = () => setCreateOpen(true);
+
+  if (authLoading || !isAuthenticated) {
+    return (
+      <div className="dl-dashboard-session" role="status">
+        Loading your workspace…
+      </div>
+    );
+  }
 
   return (
-    <div className="dl-home">
-      <header className="dl-home-top">
-        <div className="dl-home-brand">
-          <Link href="/projects" className="dl-home-logo">
-            Delayance
-          </Link>
-          <span className="dl-home-tag">Workspace</span>
-        </div>
-        <div className="dl-home-top-actions">
-          <ThemeSwitcher />
-          <Link href="/account" className="dl-home-ghost-btn">
-            Account
-          </Link>
-          <button
-            type="button"
-            className="dl-home-ghost-btn"
-            onClick={() => {
-              clearTokens();
-              router.push('/login');
-            }}
-          >
-            Sign out
-          </button>
+    <div className="dl-dashboard">
+      <header className="dl-dashboard-topbar">
+        <div className="dl-dashboard-topbar-inner">
+          <BrandLogo href="/projects" className="dl-dashboard-brand" />
+          <UserMenu appearance="dashboard" />
         </div>
       </header>
 
-      <main className="dl-home-main">
-        <section className="dl-home-hero">
+      <main className="dl-dashboard-main">
+        <header className="dl-dashboard-header">
           <div>
-            <h1 className="dl-home-title">Your projects</h1>
-            <p className="dl-home-subtitle">
-              Open a project to write, or create one with local Ollama AI ready to go.
-            </p>
+            <h1>Your projects</h1>
+            <p>Open a project to write, or create a new workspace for your documents.</p>
           </div>
-          <button type="button" className="dl-home-primary-btn" onClick={() => setCreateOpen(true)}>
-            Create new project
-          </button>
-        </section>
-
-        {error ? <p className="dl-home-error">{error}</p> : null}
-
-        <section className="dl-home-stats" aria-label="Overview">
-          <div className="dl-home-stat">
-            <span className="dl-home-stat-value">{projects?.length ?? '—'}</span>
-            <span className="dl-home-stat-label">Projects</span>
+          <div className="dl-dashboard-header-actions">
+            <CreateProjectButton onClick={openCreate} />
           </div>
-          <div className="dl-home-stat">
-            <span className="dl-home-stat-value">{projects ? totalDocs : '—'}</span>
-            <span className="dl-home-stat-label">Documents</span>
-          </div>
-        </section>
+        </header>
 
-        <section className="dl-home-grid-section">
-          <div className="dl-home-section-head">
-            <h2>All projects</h2>
-            {projects && projects.length > 0 ? (
-              <button
-                type="button"
-                className="dl-home-text-btn"
-                onClick={() => setCreateOpen(true)}
-              >
-                + New
-              </button>
-            ) : null}
+        {error ? (
+          <div className="dl-dashboard-error" role="alert">
+            <span>We couldn’t load your projects. {error}</span>
+            <button type="button" onClick={() => void load()}>
+              Try again
+            </button>
           </div>
+        ) : null}
 
+        <div className="dl-dashboard-counts" role="group" aria-label="Workspace overview">
+          <span>
+            <strong>{projects?.length ?? '—'}</strong>{' '}
+            {projects?.length === 1 ? 'project' : 'projects'}
+          </span>
+          <span>
+            <strong>{projects ? totalDocs : '—'}</strong>{' '}
+            {projects && totalDocs === 1 ? 'document' : 'documents'}
+          </span>
+        </div>
+
+        <section
+          id="recent-projects"
+          className="dl-dashboard-projects"
+          aria-labelledby="recent-projects-title"
+        >
+          <div className="dl-dashboard-section-title">
+            <h2 id="recent-projects-title">All projects</h2>
+          </div>
           {projects === null ? (
-            <p className="dl-home-muted">Loading projects…</p>
-          ) : projects.length === 0 ? (
-            <div className="dl-home-empty">
-              <h3>No projects yet</h3>
-              <p>Create your first project to start writing structured documents with AI help.</p>
-              <button
-                type="button"
-                className="dl-home-primary-btn"
-                onClick={() => setCreateOpen(true)}
-              >
-                Create new project
-              </button>
+            <div className="dl-dashboard-recent-empty" role="status">
+              <span className="dl-dashboard-icon">
+                <DashboardIcon name="folder" />
+              </span>
+              <h3>{error ? 'Projects unavailable' : 'Loading projects…'}</h3>
+              <p>
+                {error
+                  ? 'Try again to reconnect to your workspace.'
+                  : 'Your workspace will be ready in a moment.'}
+              </p>
             </div>
-          ) : (
-            <ul className="dl-home-project-grid">
-              {projects.map((p) => (
+          ) : projects.length ? (
+            <ul className="dl-dashboard-project-list">
+              {recentProjects.map((p) => (
                 <li key={p.id}>
-                  <Link href={`/projects/${p.id}`} className="dl-home-project-card">
-                    <div className="dl-home-project-card-top">
-                      <h3>{p.name}</h3>
-                      <span className="dl-home-role">{p.role}</span>
-                    </div>
-                    <p className="dl-home-project-desc">
-                      {p.description?.trim() || 'No description'}
-                    </p>
-                    <div className="dl-home-project-meta">
-                      <span>
-                        {p.documentCount} document{p.documentCount === 1 ? '' : 's'}
-                      </span>
-                      <span>{formatRelative(p.updatedAt)}</span>
-                    </div>
+                  <Link href={`/projects/${p.id}`}>
+                    <span className="dl-dashboard-icon">
+                      <DashboardIcon name="folder" />
+                    </span>
+                    <span className="dl-dashboard-project-copy">
+                      <strong>{p.name}</strong>
+                      <small>
+                        {p.documentCount} document{p.documentCount === 1 ? '' : 's'} ·{' '}
+                        {formatRelative(p.updatedAt)}
+                      </small>
+                    </span>
+                    <DashboardIcon name="chevron" className="dl-dashboard-chevron" />
                   </Link>
                 </li>
               ))}
             </ul>
+          ) : (
+            <article className="dl-dashboard-welcome-card">
+              <WorkspaceIllustration />
+              <div className="dl-dashboard-welcome-copy">
+                <h2>No projects yet</h2>
+                <p>Create your first project to start writing structured documents with AI help.</p>
+                <CreateProjectButton onClick={openCreate} />
+              </div>
+            </article>
           )}
         </section>
 
-        <section className="dl-home-tips">
-          <h2>Quick tips</h2>
-          <ul>
-            <li>AI uses your local Ollama models — nothing leaves your machine by default.</li>
-            <li>Open a project hub to manage documents, memory, and sources.</li>
-            <li>In the editor, use the AI panel for Ask, Edit, Write, and Review modes.</li>
-          </ul>
-        </section>
+        <aside className="dl-dashboard-tips">
+          <span className="dl-dashboard-icon">
+            <DashboardIcon name="bulb" />
+          </span>
+          <div>
+            <h2>Quick tips</h2>
+            <ul>
+              <li>The AI assistant uses Google Gemini to help with your documents.</li>
+              <li>Open a project hub to manage documents, memory, and sources.</li>
+              <li>In the editor, use the AI panel for Ask, Edit, Write, and Review modes.</li>
+            </ul>
+          </div>
+        </aside>
       </main>
 
       {createOpen ? (
@@ -296,70 +248,6 @@ export default function ProjectsHomePage() {
                 />
               </label>
 
-              <div className="dl-modal-ai">
-                <h3>AI setup</h3>
-                <p className="dl-home-muted">
-                  Configured once at creation. Default is local Ollama.
-                </p>
-                <label className="dl-field">
-                  <span>Provider</span>
-                  <input value="Ollama (local)" disabled />
-                </label>
-                <label className="dl-field">
-                  <span>Ollama base URL</span>
-                  <input
-                    value={aiBaseUrl}
-                    onChange={(e) => setAiBaseUrl(e.target.value)}
-                    placeholder={DEFAULT_BASE}
-                  />
-                </label>
-                <label className="dl-field">
-                  <span>Model</span>
-                  <select
-                    value={aiModel}
-                    onChange={(e) => setAiModel(e.target.value)}
-                    required
-                    disabled={loadingModels || !ollama?.models.length}
-                  >
-                    {loadingModels ? <option value="">Loading models…</option> : null}
-                    {!loadingModels && !ollama?.models.length ? (
-                      <option value="">No models found</option>
-                    ) : null}
-                    {ollama?.models.map((m) => (
-                      <option key={m.name} value={m.name}>
-                        {m.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                {ollama && !ollama.ok ? (
-                  <p className="dl-home-error">{ollama.error}</p>
-                ) : null}
-                {ollama?.ok && ollama.models.length === 0 ? (
-                  <p className="dl-home-muted">
-                    No models installed. Run <code>ollama pull llama3.2</code> then refresh.
-                  </p>
-                ) : null}
-                <button
-                  type="button"
-                  className="dl-home-text-btn"
-                  onClick={() => void loadOllamaModels(aiBaseUrl)}
-                  disabled={loadingModels}
-                >
-                  Refresh model list
-                </button>
-                <label className="dl-field">
-                  <span>Policy</span>
-                  <select
-                    value={aiPolicy}
-                    onChange={(e) => setAiPolicy(e.target.value as 'local_only' | 'any')}
-                  >
-                    <option value="local_only">Local only</option>
-                    <option value="any">Allow external providers later</option>
-                  </select>
-                </label>
-              </div>
-
               <div className="dl-modal-actions">
                 <button
                   type="button"
@@ -368,7 +256,7 @@ export default function ProjectsHomePage() {
                 >
                   Cancel
                 </button>
-                <button type="submit" className="dl-home-primary-btn" disabled={creating || !aiModel}>
+                <button type="submit" className="dl-home-primary-btn" disabled={creating}>
                   {creating ? 'Creating…' : 'Create project'}
                 </button>
               </div>
@@ -377,5 +265,14 @@ export default function ProjectsHomePage() {
         </div>
       ) : null}
     </div>
+  );
+}
+
+function CreateProjectButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button type="button" className="dl-dashboard-primary" onClick={onClick}>
+      <DashboardIcon name="plus" />
+      <span>Create new project</span>
+    </button>
   );
 }

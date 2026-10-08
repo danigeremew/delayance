@@ -19,7 +19,8 @@ import {
   type AiMode,
   type IntentClassification,
 } from '@delayance/ai-core';
-import { createProvider, listOllamaModels } from '@delayance/provider-adapters';
+import { createProvider } from '@delayance/provider-adapters';
+import { aiSettingsSchema } from '@delayance/validation';
 import { documentSchema, type Document } from '@delayance/document-model';
 import type { ProjectRole } from '@delayance/shared-types';
 import { AppConfigService } from '../config/app-config.service';
@@ -57,83 +58,44 @@ export class AiService {
     const row = await this.database.db.query.projectAiSettings.findFirst({
       where: eq(projectAiSettings.projectId, projectId),
     });
-    if (!row) {
-      return {
-        projectId,
-        policy: 'local_only' as const,
-        provider: 'ollama',
-        model: 'llama3.2',
-        baseUrl: 'http://127.0.0.1:11434/v1',
-        hasApiKey: false,
-      };
-    }
+    const gemini = row?.provider === 'gemini' ? row : undefined;
     return {
-      projectId: row.projectId,
-      policy: row.policy,
-      provider: row.provider,
-      model: row.model,
-      baseUrl: row.baseUrl,
-      hasApiKey: Boolean(row.encryptedApiKey),
+      projectId,
+      policy: row?.policy ?? 'any',
+      provider: 'gemini',
+      model: gemini?.model ?? this.config.env.GEMINI_MODEL,
+      baseUrl: null,
+      hasApiKey: Boolean(gemini?.encryptedApiKey || this.config.env.GEMINI_API_KEY),
     };
   }
 
-  async listOllamaModels(baseUrl?: string | null) {
-    try {
-      const models = await listOllamaModels(baseUrl);
-      return { ok: true as const, models, baseUrl: baseUrl ?? 'http://127.0.0.1:11434/v1' };
-    } catch (err) {
-      return {
-        ok: false as const,
-        models: [] as { name: string; size: number; modifiedAt: string | null }[],
-        baseUrl: baseUrl ?? 'http://127.0.0.1:11434/v1',
-        error: err instanceof Error ? err.message : 'Failed to list Ollama models',
-      };
-    }
-  }
-
-  async putSettings(
-    projectId: string,
-    input: {
-      policy?: 'any' | 'local_only';
-      provider?: string;
-      model?: string;
-      baseUrl?: string | null;
-      apiKey?: string | null;
-    },
-  ) {
+  async putSettings(projectId: string, input: unknown) {
+    const parsed = aiSettingsSchema.safeParse(input);
+    if (!parsed.success) throw new BadRequestException('Invalid Gemini settings');
+    const settings = parsed.data;
     const existing = await this.database.db.query.projectAiSettings.findFirst({
       where: eq(projectAiSettings.projectId, projectId),
     });
+    const gemini = existing?.provider === 'gemini' ? existing : undefined;
     const encryptedApiKey =
-      input.apiKey === undefined
-        ? existing?.encryptedApiKey
-        : input.apiKey
-          ? encryptSecret(input.apiKey, this.config.env.SECRETS_ENCRYPTION_KEY)
+      settings.apiKey === undefined
+        ? (gemini?.encryptedApiKey ?? null)
+        : settings.apiKey
+          ? encryptSecret(settings.apiKey, this.config.env.SECRETS_ENCRYPTION_KEY)
           : null;
-
     const values = {
       projectId,
-      policy: input.policy ?? existing?.policy ?? ('local_only' as const),
-      provider: input.provider ?? existing?.provider ?? 'ollama',
-      model: input.model ?? existing?.model ?? 'llama3.2',
-      baseUrl:
-        input.baseUrl === undefined
-          ? (existing?.baseUrl ?? 'http://127.0.0.1:11434/v1')
-          : input.baseUrl,
-      encryptedApiKey: encryptedApiKey ?? null,
+      provider: 'gemini',
+      model: settings.model ?? gemini?.model ?? this.config.env.GEMINI_MODEL,
+      policy: settings.policy ?? existing?.policy ?? ('any' as const),
+      baseUrl: null,
+      encryptedApiKey,
       updatedAt: new Date(),
     };
-
-    const [row] = await this.database.db
-      .insert(projectAiSettings)
-      .values(values)
-      .onConflictDoUpdate({
-        target: projectAiSettings.projectId,
-        set: values,
-      })
-      .returning();
-
-    void row;
+    await this.database.db.insert(projectAiSettings).values(values).onConflictDoUpdate({
+      target: projectAiSettings.projectId,
+      set: values,
+    });
     return this.getSettings(projectId);
   }
 
@@ -141,27 +103,26 @@ export class AiService {
     const settings = await this.database.db.query.projectAiSettings.findFirst({
       where: eq(projectAiSettings.projectId, projectId),
     });
-    const provider = settings?.provider ?? 'ollama';
-    const policy = settings?.policy ?? 'local_only';
-    const apiKey = settings?.encryptedApiKey
-      ? decryptSecret(settings.encryptedApiKey, this.config.env.SECRETS_ENCRYPTION_KEY)
-      : null;
-    const adapter = createProvider({
-      provider,
-      apiKey,
-      baseUrl: settings?.baseUrl ?? 'http://127.0.0.1:11434/v1',
-    });
-    if (policy === 'local_only' && !adapter.isLocal) {
+    if (settings?.policy === 'local_only') {
       throw new ForbiddenException(
-        'Project policy is local AI only; configure Ollama or a local OpenAI-compatible endpoint',
+        'This project allows local AI only. An editor must allow external AI in project settings before using Gemini.',
+      );
+    }
+    const gemini = settings?.provider === 'gemini' ? settings : undefined;
+    const apiKey = gemini?.encryptedApiKey
+      ? decryptSecret(gemini.encryptedApiKey, this.config.env.SECRETS_ENCRYPTION_KEY)
+      : this.config.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      throw new BadRequestException(
+        'Gemini is not configured. Set GEMINI_API_KEY on the API server.',
       );
     }
     return {
-      adapter,
-      model: settings?.model ?? 'llama3.2',
-      provider,
-      policy,
-      external: !adapter.isLocal,
+      adapter: createProvider({ provider: 'gemini', apiKey }),
+      model: gemini?.model ?? this.config.env.GEMINI_MODEL,
+      provider: 'gemini',
+      policy: 'any' as const,
+      external: true,
     };
   }
 
@@ -426,9 +387,7 @@ export class AiService {
       chatId: input.chatId,
       instruction: input.instruction,
     });
-    const { adapter, model, provider, external } = await this.resolveProvider(
-      input.projectId,
-    );
+    const { adapter, model, provider, external } = await this.resolveProvider(input.projectId);
 
     const memories = await this.database.db
       .select()
@@ -467,8 +426,7 @@ export class AiService {
     if (input.mode === 'ask') {
       raw = await adapter.completeStructured(messages, {
         model,
-        schemaHint:
-          '{"answer":"markdown answer","citedSourceIds":["source-uuid"]}',
+        schemaHint: '{"answer":"markdown answer","citedSourceIds":["source-uuid"]}',
       });
       const parsed = raw as { answer?: string; citedSourceIds?: string[] };
       answer = parsed.answer;
@@ -494,8 +452,11 @@ export class AiService {
 
     const findings =
       validated.payload?.findings ??
-      (raw as { findings?: { nodeId?: string; severity?: string; message: string; suggestion?: string }[] })
-        .findings ??
+      (
+        raw as {
+          findings?: { nodeId?: string; severity?: string; message: string; suggestion?: string }[];
+        }
+      ).findings ??
       [];
 
     const shouldAutoApply =
@@ -642,10 +603,7 @@ export class AiService {
 
       if (input.mode === 'auto' && !input.preferredMode) {
         yield { type: 'status', message: 'Choosing mode…' };
-        const classification = await this.resolveIntent(
-          input.projectId,
-          input.instruction,
-        );
+        const classification = await this.resolveIntent(input.projectId, input.instruction);
         if (classification.needsClarification || !classification.mode) {
           const [proposal] = await this.database.db
             .insert(aiProposals)
@@ -730,9 +688,7 @@ export class AiService {
 
       const docRow = await this.documents.get(input.projectId, input.documentId);
       const content = asDocument(docRow.content);
-      const { adapter, model, provider, external } = await this.resolveProvider(
-        input.projectId,
-      );
+      const { adapter, model, provider, external } = await this.resolveProvider(input.projectId);
 
       if (!adapter.stream) {
         // Provider cannot stream — fall back to complete write.

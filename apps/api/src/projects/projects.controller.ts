@@ -1,14 +1,4 @@
-import {
-  Body,
-  Controller,
-  Delete,
-  Get,
-  Param,
-  Patch,
-  Post,
-  Req,
-  UseGuards,
-} from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
@@ -41,13 +31,6 @@ export class ProjectsController {
     body: {
       name: string;
       description?: string;
-      ai?: {
-        provider?: string;
-        model: string;
-        policy?: 'any' | 'local_only';
-        baseUrl?: string | null;
-        apiKey?: string | null;
-      };
     },
   ) {
     return this.projects.create(req.user.userId, body);
@@ -125,11 +108,6 @@ export class ProjectsController {
     @Param('memberId') memberId: string,
     @Req() req: { user: ProjectRequestUser },
   ) {
-    return this.projects.removeMember(
-      projectId,
-      memberId,
-      req.user.userId,
-      req.user.projectRole!,
-    );
+    return this.projects.removeMember(projectId, memberId, req.user.userId, req.user.projectRole!);
   }
 }

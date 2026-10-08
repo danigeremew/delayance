@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { apiFetch, getAccessToken } from '@/lib/api';
+import { apiFetch } from '@/lib/api';
 
 interface DocRow {
   id: string;
@@ -16,11 +16,6 @@ export default function ProjectWorkspaceRedirectPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!getAccessToken()) {
-      router.replace('/login');
-      return;
-    }
-
     let isMounted = true;
     async function openWorkspace() {
       try {
@@ -74,4 +69,3 @@ export default function ProjectWorkspaceRedirectPage() {
     </main>
   );
 }
-
