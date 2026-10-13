@@ -59,6 +59,26 @@ describe('GeminiAdapter', () => {
     await expect(new GeminiAdapter('key').complete(messages, options)).rejects.toThrow(error);
   });
 
+  it.each([
+    [401, 'invalid'],
+    [403, 'lacks access'],
+    [404, 'model is unavailable'],
+    [429, 'Quota'],
+  ])('explains Gemini HTTP %s failures without leaking provider content', async (status, hint) => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValue(new Response('private document and key', { status: Number(status) })),
+    );
+    await expect(new GeminiAdapter('key').complete(messages, options)).rejects.toThrow(
+      String(hint),
+    );
+    await expect(new GeminiAdapter('key').complete(messages, options)).rejects.not.toThrow(
+      'private document',
+    );
+  });
+
   it('does not expose provider error bodies or malformed JSON text', async () => {
     const fetch = vi.fn().mockResolvedValue(new Response('secret prompt and key', { status: 429 }));
     vi.stubGlobal('fetch', fetch);

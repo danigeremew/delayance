@@ -1,11 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createEmptyDocument, generateNodeId } from '@delayance/document-model';
 import { applyOperation } from '@delayance/document-engine';
-import {
-  parseAiProposal,
-  resolveDocumentOps,
-  validateAiProposal,
-} from './validate';
+import { parseAiProposal, resolveDocumentOps, validateAiProposal } from './validate';
 import { synthesizeWriteOpsFromText, normalizeAiNode } from './normalize';
 import { classifyAiIntent } from './intent';
 
@@ -158,6 +154,16 @@ describe('ai-core validation', () => {
 });
 
 describe('classifyAiIntent', () => {
+  it.each(['write essay on seals', 'wrtie essay on seals', 'wirte an essay on seals'])(
+    'recognizes the writing instruction %s without a provider classification call',
+    (instruction) => {
+      expect(classifyAiIntent(instruction)).toMatchObject({
+        mode: 'write',
+        confidence: 'high',
+        needsClarification: false,
+      });
+    },
+  );
   it('routes questions to ask', () => {
     const r = classifyAiIntent('What does section 2 say about delays?');
     expect(r.mode).toBe('ask');

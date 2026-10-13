@@ -191,16 +191,9 @@ export default function WorkspacePage() {
               projectId={projectId}
               documentId={documentId}
               selectedNodeId={null}
+              editor={editor}
               onCollapse={() => setRightOpen(false)}
-              onStreamStart={() => undefined}
-              onStreamToken={() => undefined}
-              onStreamFinish={() => undefined}
-              onStreamAbort={() => undefined}
-              onAccepted={() =>
-                setError(
-                  'AI document mutations are being migrated to the LibreOffice bridge. Ask and Review remain available.',
-                )
-              }
+              onAccepted={() => setError(null)}
             />
           </aside>
         ) : null}

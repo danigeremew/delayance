@@ -52,7 +52,13 @@ export class OfficeService {
       throw new BadRequestException('LibreOffice integration is disabled');
     }
     const document = await this.requireDocument(input.projectId, input.documentId);
-    await this.ensureOfficeFile(document.id, document.projectId, document.title, input.userId, document.content);
+    await this.ensureOfficeFile(
+      document.id,
+      document.projectId,
+      document.title,
+      input.userId,
+      document.content,
+    );
     const permission = canEditContent(input.role) ? 'write' : 'read';
     const token = randomBytes(32).toString('base64url');
     const expiresAt = new Date(Date.now() + this.config.env.WOPI_TOKEN_TTL_SECONDS * 1000);
@@ -88,16 +94,21 @@ export class OfficeService {
         isNull(officeSessions.revokedAt),
       ),
     });
-    if (!session || session.expiresAt <= new Date()) throw new ForbiddenException('Invalid WOPI token');
+    if (!session || session.expiresAt <= new Date())
+      throw new ForbiddenException('Invalid WOPI token');
     const document = await this.database.db.query.documents.findFirst({
       where: eq(documents.id, documentId),
     });
     if (!document) throw new NotFoundException('Document not found');
     const member = await this.database.db.query.projectMembers.findFirst({
-      where: and(eq(projectMembers.projectId, document.projectId), eq(projectMembers.userId, session.userId)),
+      where: and(
+        eq(projectMembers.projectId, document.projectId),
+        eq(projectMembers.userId, session.userId),
+      ),
     });
     if (!member) throw new ForbiddenException('Project access revoked');
-    const permission = canEditContent(member.role) && session.permission === 'write' ? 'write' : 'read';
+    const permission =
+      canEditContent(member.role) && session.permission === 'write' ? 'write' : 'read';
     await this.database.db
       .update(officeSessions)
       .set({ lastUsedAt: new Date() })
@@ -141,7 +152,8 @@ export class OfficeService {
       HideRuler: true,
       DisableSidebar: true,
       EnableInsertRemoteImage: true,
-      UI_Defaults: 'UIMode=compact;ShowSidebar=false;TextSidebar=false;Sidebar=false;ShowProperties=false;ShowMenubar=false;ShowToolbar=false;ShowStatusbar=false;ShowRuler=false;TextMenubar=false;TextStatusbar=false;TextRuler=false;SaveAsMode=group',
+      UI_Defaults:
+        'UIMode=compact;ShowSidebar=false;TextSidebar=false;Sidebar=false;ShowProperties=false;ShowMenubar=false;ShowToolbar=false;ShowStatusbar=false;ShowRuler=false;TextMenubar=false;TextStatusbar=false;TextRuler=false;UITheme=light;SavedUIState=false;SaveAsMode=group',
     };
   }
 
@@ -162,7 +174,13 @@ export class OfficeService {
   async download(projectId: string, documentId: string) {
     const document = await this.requireDocument(projectId, documentId);
     if (!document.fileKey) throw new NotFoundException('Office file has not been created');
-    return { filename: this.safeFilename(document.title), file: await this.storage.getObjectBuffer(document.fileKey) };
+    return {
+      filename: this.safeFilename(document.title),
+      title: document.title,
+      fileHash: document.fileHash,
+      version: document.currentVersion,
+      file: await this.storage.getObjectBuffer(document.fileKey),
+    };
   }
 
   async getFile(session: WopiSession) {
@@ -180,7 +198,10 @@ export class OfficeService {
     const document = await this.requireDocument(session.projectId, session.documentId);
     const fileHash = createHash('sha256').update(buffer).digest('hex');
     if (fileHash === document.fileHash) {
-      return { LastModifiedTime: document.updatedAt.toISOString(), version: document.currentVersion };
+      return {
+        LastModifiedTime: document.updatedAt.toISOString(),
+        version: document.currentVersion,
+      };
     }
     const fileKey = `documents/${document.id}/files/${fileHash}.docx`;
     if (!(await this.storage.objectExists(fileKey))) {
@@ -225,7 +246,13 @@ export class OfficeService {
       projectId: document.projectId,
       documentId: document.id,
       userId: session.userId,
-      payload: { documentId: document.id, projectId: document.projectId, fileKey, fileHash, version },
+      payload: {
+        documentId: document.id,
+        projectId: document.projectId,
+        fileKey,
+        fileHash,
+        version,
+      },
     });
     return { LastModifiedTime: new Date().toISOString(), version };
   }
@@ -268,16 +295,28 @@ export class OfficeService {
     userId: string,
     legacyContent: unknown,
   ) {
-    const existing = await this.database.db.query.documents.findFirst({ where: eq(documents.id, documentId) });
+    const existing = await this.database.db.query.documents.findFirst({
+      where: eq(documents.id, documentId),
+    });
     if (existing?.fileKey) return;
-    const content = legacyContent && typeof legacyContent === 'object'
-      ? legacyContent as ReturnType<typeof createEmptyDocument>
-      : createEmptyDocument(title);
-    const exported = await exportDocx(content, { includeTocField: false, includePageNumberFields: true });
+    const content =
+      legacyContent && typeof legacyContent === 'object'
+        ? (legacyContent as ReturnType<typeof createEmptyDocument>)
+        : createEmptyDocument(title);
+    const exported = await exportDocx(content, {
+      includeTocField: false,
+      includePageNumberFields: true,
+    });
     const fileHash = createHash('sha256').update(exported.buffer).digest('hex');
     const fileKey = `documents/${documentId}/files/${fileHash}.docx`;
     if (!(await this.storage.objectExists(fileKey))) {
-      await this.storage.putObjectAtKey({ projectId, userId, objectKey: fileKey, contentType: DOCX_CONTENT_TYPE, body: exported.buffer });
+      await this.storage.putObjectAtKey({
+        projectId,
+        userId,
+        objectKey: fileKey,
+        contentType: DOCX_CONTENT_TYPE,
+        body: exported.buffer,
+      });
     }
     await this.database.db
       .update(documents)
@@ -314,8 +353,12 @@ export class OfficeService {
     const action = [...xml.matchAll(/<action\b[^>]*>/g)]
       .map((match) => match[0])
       .find((tag) => new RegExp(`name="${actionName}"`).test(tag) && /ext="docx"/.test(tag));
-    const fallback = [...xml.matchAll(/<action\b[^>]*>/g)].map((match) => match[0]).find((tag) => new RegExp(`name="${actionName}"`).test(tag));
-    const source = (/(?:urlsrc)="([^"]+)"/.exec(action ?? fallback ?? '')?.[1])?.replace(/&amp;/g, '&');
+    const fallback = [...xml.matchAll(/<action\b[^>]*>/g)]
+      .map((match) => match[0])
+      .find((tag) => new RegExp(`name="${actionName}"`).test(tag));
+    const source = /(?:urlsrc)="([^"]+)"/
+      .exec(action ?? fallback ?? '')?.[1]
+      ?.replace(/&amp;/g, '&');
     if (!source) throw new BadRequestException('Collabora discovery has no Writer action');
     const discovered = new URL(source);
     const browserOrigin = new URL(this.config.env.OFFICE_BROWSER_URL).origin;

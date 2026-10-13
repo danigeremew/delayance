@@ -66,6 +66,7 @@ export class AiService {
       model: gemini?.model ?? this.config.env.GEMINI_MODEL,
       baseUrl: null,
       hasApiKey: Boolean(gemini?.encryptedApiKey || this.config.env.GEMINI_API_KEY),
+      hasCustomApiKey: Boolean(gemini?.encryptedApiKey),
     };
   }
 
@@ -99,7 +100,7 @@ export class AiService {
     return this.getSettings(projectId);
   }
 
-  private async resolveProvider(projectId: string) {
+  async resolveProvider(projectId: string) {
     const settings = await this.database.db.query.projectAiSettings.findFirst({
       where: eq(projectAiSettings.projectId, projectId),
     });
@@ -114,7 +115,7 @@ export class AiService {
       : this.config.env.GEMINI_API_KEY;
     if (!apiKey) {
       throw new BadRequestException(
-        'Gemini is not configured. Set GEMINI_API_KEY on the API server.',
+        'Gemini is not configured. Set GEMINI_API_KEY on the API server or configure a Gemini API key in AI settings.',
       );
     }
     return {
@@ -341,10 +342,7 @@ export class AiService {
     }
   }
 
-  private async resolveIntent(
-    projectId: string,
-    instruction: string,
-  ): Promise<IntentClassification> {
+  async resolveIntent(projectId: string, instruction: string): Promise<IntentClassification> {
     const heuristic = classifyAiIntent(instruction);
     if (heuristic.needsClarification) return heuristic;
     if (heuristic.confidence === 'high') return heuristic;
@@ -357,7 +355,7 @@ export class AiService {
         schemaHint:
           '{"mode":"ask"|"edit"|"write"|"review"|null,"needsClarification":false,"reason":"..."}',
         temperature: 0,
-        maxTokens: 200,
+        maxTokens: 8192,
       });
       const parsed = parseIntentClassification(raw);
       if (parsed) return parsed;
@@ -378,7 +376,10 @@ export class AiService {
     nodeIds?: string[];
     chatId?: string;
   }) {
+    this.assertModeAllowed(input.role, input.mode);
     const docRow = await this.documents.get(input.projectId, input.documentId);
+    if (docRow.fileKey)
+      throw new BadRequestException('Use the LibreOffice AI endpoint for this document.');
     const content = asDocument(docRow.content);
     const chatId = await this.resolveChatId({
       projectId: input.projectId,
@@ -687,6 +688,8 @@ export class AiService {
       yield { type: 'status', message: 'Writing…' };
 
       const docRow = await this.documents.get(input.projectId, input.documentId);
+      if (docRow.fileKey)
+        throw new BadRequestException('Use the LibreOffice AI endpoint for this document.');
       const content = asDocument(docRow.content);
       const { adapter, model, provider, external } = await this.resolveProvider(input.projectId);
 
@@ -849,6 +852,8 @@ export class AiService {
     }
 
     const docRow = await this.documents.get(input.projectId, proposal.documentId);
+    if (docRow.fileKey)
+      throw new BadRequestException('Legacy operations cannot modify a LibreOffice document.');
     const content = asDocument(docRow.content);
 
     const validated = validateAiProposal(

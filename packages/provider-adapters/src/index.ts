@@ -41,6 +41,20 @@ function responseText(value: unknown): string {
   );
 }
 
+export function geminiRequestError(status: number): Error {
+  const advice: Record<number, string> = {
+    400: 'Check your API key and whether the selected model supports this request.',
+    401: 'The API key is invalid. Replace it in AI settings.',
+    403: 'The API key lacks access. Check key restrictions, project permissions and regional availability.',
+    404: 'This model is unavailable for your key. Choose a current text model in AI settings.',
+    429: 'Quota or rate limit reached. Check Google AI Studio billing and quota, then retry.',
+    503: 'Gemini is temporarily unavailable. Retry shortly.',
+  };
+  return new Error(
+    `Gemini request failed (${status}). ${advice[status] ?? 'Retry or check your Gemini project settings.'}`,
+  );
+}
+
 export class GeminiAdapter implements AiProvider {
   readonly name = 'gemini';
   readonly isLocal = false;
@@ -87,7 +101,7 @@ export class GeminiAdapter implements AiProvider {
       throw new Error('Could not reach Gemini');
     });
     // Provider error bodies can contain submitted content; never expose them.
-    if (!response.ok) throw new Error(`Gemini request failed (${response.status})`);
+    if (!response.ok) throw geminiRequestError(response.status);
     return response;
   }
 

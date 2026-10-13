@@ -1,5 +1,6 @@
 import {
   Body,
+  BadRequestException,
   Controller,
   Get,
   Param,
@@ -14,12 +15,17 @@ import {
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { z } from 'zod';
-import { aiSettingsSchema } from '@delayance/validation';
+import {
+  aiSettingsSchema,
+  officeAiRequestSchema,
+  officeAiAcceptanceSchema,
+} from '@delayance/validation';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { ProjectRoleGuard, type ProjectRequestUser } from '../rbac/project-role.guard';
 import { RequireProjectRoles } from '../rbac/roles';
 import { AiService } from './ai.service';
+import { OfficeAiService } from './office-ai.service';
 
 const aiRequestSchema = z.object({
   instruction: z.string().min(1).max(20000),
@@ -53,7 +59,72 @@ const updateChatSchema = z.object({
 @UseGuards(JwtAuthGuard, ProjectRoleGuard)
 @Controller()
 export class AiController {
-  constructor(private readonly ai: AiService) {}
+  constructor(
+    private readonly ai: AiService,
+    private readonly officeAi: OfficeAiService,
+  ) {}
+
+  @Post('projects/:projectId/ai-settings/test')
+  @RequireProjectRoles('editor')
+  async testSettings(@Param('projectId') projectId: string) {
+    const { adapter, model } = await this.ai.resolveProvider(projectId);
+    try {
+      await adapter.complete([{ role: 'user', content: 'Reply OK.' }], { model });
+      return { ok: true, model };
+    } catch (error) {
+      throw new BadRequestException(
+        error instanceof Error ? error.message : 'Gemini connection failed',
+      );
+    }
+  }
+
+  @Post('projects/:projectId/documents/:documentId/office/ai')
+  @RequireProjectRoles('viewer')
+  runOfficeAi(
+    @Param('projectId') projectId: string,
+    @Param('documentId') documentId: string,
+    @Req() req: { user: ProjectRequestUser },
+    @Body(new ZodValidationPipe(officeAiRequestSchema)) body: z.infer<typeof officeAiRequestSchema>,
+  ) {
+    return this.officeAi.run(projectId, documentId, req.user.userId, req.user.projectRole!, body);
+  }
+
+  @Post('projects/:projectId/ai/proposals/:proposalId/office-accept')
+  @RequireProjectRoles('contributor')
+  authorizeOfficeAi(
+    @Param('projectId') projectId: string,
+    @Param('proposalId') proposalId: string,
+    @Req() req: { user: ProjectRequestUser },
+    @Body(new ZodValidationPipe(officeAiAcceptanceSchema))
+    body: z.infer<typeof officeAiAcceptanceSchema>,
+  ) {
+    return this.officeAi.authorize(
+      projectId,
+      proposalId,
+      req.user.userId,
+      req.user.projectRole!,
+      body.accessToken,
+    );
+  }
+
+  @Post('projects/:projectId/ai/proposals/:proposalId/office-complete')
+  @RequireProjectRoles('contributor')
+  completeOfficeAi(
+    @Param('projectId') projectId: string,
+    @Param('proposalId') proposalId: string,
+    @Req() req: { user: ProjectRequestUser },
+    @Body(new ZodValidationPipe(officeAiAcceptanceSchema))
+    body: z.infer<typeof officeAiAcceptanceSchema>,
+  ) {
+    return this.officeAi.authorize(
+      projectId,
+      proposalId,
+      req.user.userId,
+      req.user.projectRole!,
+      body.accessToken,
+      true,
+    );
+  }
 
   @Get('projects/:projectId/ai-settings')
   @RequireProjectRoles('viewer')

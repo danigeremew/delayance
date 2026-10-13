@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import { apiFetch, apiFetchSse } from '@/lib/api';
+import type { EditorAdapter } from '@/editor/adapter';
 import type { Document } from '@delayance/document-model';
 
 type Mode = 'auto' | 'ask' | 'edit' | 'write' | 'review';
@@ -11,10 +12,35 @@ const MODES: { id: Mode; label: string; hint: string }[] = [
   { id: 'ask', label: 'Ask', hint: 'Chat only — document unchanged' },
   { id: 'edit', label: 'Edit', hint: 'Change existing document content' },
   { id: 'write', label: 'Write', hint: 'Insert new content into the document' },
-  { id: 'review', label: 'Review', hint: 'Findings and optional document updates' },
+  { id: 'review', label: 'Review', hint: 'Review document text and suggest improvements' },
 ];
 
-const GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-2.5-pro'];
+const GEMINI_MODELS = [
+  'gemini-3.8-flash',
+  'gemini-3.5-flash-lite',
+  'gemini-3.1-pro-preview',
+  'gemini-3.1-flash-lite',
+  'gemini-flash-latest',
+  'gemini-2.5-flash',
+  'gemini-2.5-pro',
+];
+
+interface OfficeRevision {
+  type: 'office-text';
+  action: 'insert' | 'replace';
+  originalText: string;
+  text: string;
+}
+function officeRevision(value: unknown): OfficeRevision | null {
+  if (!value || typeof value !== 'object') return null;
+  const row = value as Record<string, unknown>;
+  return row.type === 'office-text' &&
+    (row.action === 'insert' || row.action === 'replace') &&
+    typeof row.originalText === 'string' &&
+    typeof row.text === 'string'
+    ? { type: 'office-text', action: row.action, originalText: row.originalText, text: row.text }
+    : null;
+}
 
 interface Chat {
   id: string;
@@ -136,6 +162,27 @@ function IconStop() {
   );
 }
 
+function IconSettings() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 function ComposerPill({
   label,
   title,
@@ -196,6 +243,8 @@ export function AiPanel({
   projectId,
   documentId,
   selectedNodeId,
+  initialShowSettings = false,
+  editor,
   onAccepted,
   onStreamStart,
   onStreamToken,
@@ -206,6 +255,8 @@ export function AiPanel({
   projectId: string;
   documentId: string;
   selectedNodeId: string | null;
+  initialShowSettings?: boolean;
+  editor?: EditorAdapter | null;
   onAccepted: () => void;
   /** Called once before the first streamed token hits the editor. */
   onStreamStart?: () => void;
@@ -224,15 +275,25 @@ export function AiPanel({
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [openTabIds, setOpenTabIds] = useState<string[]>([]);
   const [showHistory, setShowHistory] = useState(false);
+  const [showSettings, setShowSettings] = useState(initialShowSettings);
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [settings, setSettings] = useState<{
     provider: string;
     model: string;
     policy: string;
     baseUrl?: string | null;
+    hasApiKey?: boolean;
+    hasCustomApiKey?: boolean;
   } | null>(null);
   const [sources, setSources] = useState<SourceRow[]>([]);
   const [menuOpen, setMenuOpen] = useState<'mode' | 'model' | null>(null);
+  const [apiKeyInput, setApiKeyInput] = useState('');
+  const [showApiKey, setShowApiKey] = useState(false);
+  const [selectedModel, setSelectedModel] = useState<string>('gemini-3.8-flash');
+  const [selectedPolicy, setSelectedPolicy] = useState<'any' | 'local_only'>('any');
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [settingsSuccess, setSettingsSuccess] = useState<string | null>(null);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -263,6 +324,7 @@ export function AiPanel({
       setActiveChatId(chatId);
       setOpenTabIds((prev) => (prev.includes(chatId) ? prev : [...prev, chatId]));
       setShowHistory(false);
+      setShowSettings(false);
       setError(null);
       await loadProposals(chatId);
     },
@@ -279,6 +341,7 @@ export function AiPanel({
     setOpenTabIds((prev) => [...prev.filter((id) => id !== chat.id), chat.id]);
     setProposals([]);
     setShowHistory(false);
+    setShowSettings(false);
     setError(null);
   }, [projectId, documentId, loadChats]);
 
@@ -304,11 +367,15 @@ export function AiPanel({
             model: string;
             policy: string;
             baseUrl: string | null;
+            hasApiKey: boolean;
+            hasCustomApiKey?: boolean;
           }>(`/projects/${projectId}/ai-settings`),
           apiFetch<SourceRow[]>(`/projects/${projectId}/sources`),
           loadChats(),
         ]);
         setSettings(s);
+        setSelectedModel(s.model || 'gemini-3.8-flash');
+        setSelectedPolicy((s.policy as 'any' | 'local_only') || 'any');
         setSources(src);
         if (!bootstrapped.current) {
           bootstrapped.current = true;
@@ -328,9 +395,16 @@ export function AiPanel({
   }, [projectId, documentId, loadChats, loadProposals, startNewChat]);
 
   useEffect(() => {
+    if (settings) {
+      setSelectedModel(settings.model || 'gemini-3.8-flash');
+      setSelectedPolicy((settings.policy as 'any' | 'local_only') || 'any');
+    }
+  }, [settings]);
+
+  useEffect(() => {
     const el = listRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [proposals, busy, showHistory]);
+  }, [proposals, busy, showHistory, showSettings]);
 
   const stop = () => {
     abortRef.current?.abort();
@@ -340,14 +414,67 @@ export function AiPanel({
 
   const changeModel = async (model: string) => {
     if (!settings) return;
-    setSettings({ ...settings, model });
+
     try {
       await apiFetch(`/projects/${projectId}/ai-settings`, {
         method: 'PUT',
         body: JSON.stringify({ model }),
       });
+      setSettings({ ...settings, model });
+      setSelectedModel(model);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not update model');
+    }
+  };
+
+  const saveSettings = async (opts?: { clearApiKey?: boolean }) => {
+    setSettingsSaving(true);
+    setSettingsSuccess(null);
+    setSettingsError(null);
+    try {
+      const payload: {
+        model?: string;
+        policy?: 'any' | 'local_only';
+        apiKey?: string | null;
+      } = {
+        model: selectedModel.trim() || undefined,
+        policy: selectedPolicy,
+      };
+
+      if (opts?.clearApiKey) {
+        payload.apiKey = null;
+      } else if (apiKeyInput.trim()) {
+        payload.apiKey = apiKeyInput.trim();
+      }
+
+      const updated = await apiFetch<{
+        provider: string;
+        model: string;
+        policy: string;
+        baseUrl: string | null;
+        hasApiKey: boolean;
+        hasCustomApiKey?: boolean;
+      }>(`/projects/${projectId}/ai-settings`, {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      });
+
+      setSettings(updated);
+      setSelectedModel(updated.model || 'gemini-3.8-flash');
+      setSelectedPolicy((updated.policy as 'any' | 'local_only') || 'any');
+      setApiKeyInput('');
+      setSettingsSuccess(
+        opts?.clearApiKey
+          ? 'Custom API key removed.'
+          : payload.apiKey
+            ? 'Gemini API key and settings saved successfully.'
+            : 'Settings saved successfully.',
+      );
+      setError(null);
+    } catch (e) {
+      setSettingsError(e instanceof Error ? e.message : 'Could not save AI settings');
+    } finally {
+      setSettingsSaving(false);
     }
   };
 
@@ -386,6 +513,37 @@ export function AiPanel({
         chatId = chat.id;
         setActiveChatId(chat.id);
         setOpenTabIds((prev) => [...prev.filter((id) => id !== chat.id), chat.id]);
+      }
+
+      if (editor !== undefined) {
+        if (!editor) throw new Error('Wait for LibreOffice to load.');
+        await editor.save();
+        // Stock Collabora does not expose opaque range handles. Capture the text,
+        // then require the same text to be selected again at explicit acceptance.
+        const selection =
+          mode === 'edit' || mode === 'auto' || opts?.preferredMode === 'edit'
+            ? await editor.getSelection()
+            : null;
+        const result = await apiFetch<{
+          chatId: string;
+          externalProviderWarning: string | null;
+          validation: { ok: boolean; errors: string[] };
+        }>(`/projects/${projectId}/documents/${documentId}/office/ai`, {
+          method: 'POST',
+          signal: ac.signal,
+          body: JSON.stringify({
+            instruction: prompt,
+            mode: opts?.preferredMode ? 'auto' : mode,
+            preferredMode: opts?.preferredMode,
+            chatId,
+            selectedText: selection?.text ?? '',
+          }),
+        });
+        setWarning(result.externalProviderWarning);
+        if (!opts?.instruction) setInstruction('');
+        setActiveChatId(result.chatId);
+        await Promise.all([loadChats(), loadProposals(result.chatId)]);
+        return;
       }
 
       if (useStream && (mode === 'write' || mode === 'auto' || opts?.preferredMode)) {
@@ -538,12 +696,70 @@ export function AiPanel({
   };
 
   const accept = async (id: string) => {
-    await apiFetch(`/projects/${projectId}/ai/proposals/${id}/accept`, {
-      method: 'POST',
-      body: '{}',
-    });
-    await loadProposals(activeChatId);
-    onAccepted();
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const proposal = proposals.find((item) => item.id === id);
+      const revision = officeRevision(proposal?.ops[0]);
+      if (revision) {
+        if (!editor) throw new Error('Wait for LibreOffice to load.');
+        await editor.save();
+        const selection = await editor.getSelection();
+        if (revision.action === 'replace' && selection.text !== revision.originalText) {
+          throw new Error(
+            'Select the original text shown in the preview in LibreOffice, then apply.',
+          );
+        }
+        if (revision.action === 'insert' && !selection.isCollapsed) {
+          throw new Error(
+            'Place the cursor where the new text should be inserted, without selecting text.',
+          );
+        }
+        const body = JSON.stringify({ accessToken: editor.getSessionToken() });
+        await apiFetch(`/projects/${projectId}/ai/proposals/${id}/office-accept`, {
+          method: 'POST',
+          body,
+        });
+        if (revision.action === 'replace')
+          await editor.replaceSelection(selection.handle, revision.text);
+        else await editor.insertText(selection.handle, revision.text);
+        await editor.save();
+        // Collabora acknowledges its save before the WOPI upload has always finished.
+        // Retry verification, never the paste, while the immutable file version arrives.
+        for (let attempt = 0; ; attempt++) {
+          try {
+            await apiFetch(`/projects/${projectId}/ai/proposals/${id}/office-complete`, {
+              method: 'POST',
+              body,
+            });
+            break;
+          } catch (cause) {
+            const pendingSave =
+              cause instanceof Error &&
+              (cause.message === 'The editor has not saved the change yet.' ||
+                cause.message === 'The saved document does not contain the proposed text yet.');
+            if (!pendingSave || attempt >= 20) throw cause;
+            await new Promise<void>((resolve) => window.setTimeout(resolve, 1000));
+          }
+        }
+      } else {
+        if (editor !== undefined)
+          throw new Error(
+            'This proposal cannot modify the LibreOffice document. Generate a new Edit or Write proposal.',
+          );
+        await apiFetch(`/projects/${projectId}/ai/proposals/${id}/accept`, {
+          method: 'POST',
+          body: '{}',
+        });
+      }
+      await loadProposals(activeChatId);
+      onAccepted();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not apply proposal');
+    } finally {
+      setBusy(false);
+    }
   };
 
   const reject = async (id: string) => {
@@ -575,6 +791,23 @@ export function AiPanel({
     }
   };
 
+  const testConnection = async () => {
+    setSettingsSaving(true);
+    setSettingsError(null);
+    setSettingsSuccess(null);
+    try {
+      const result = await apiFetch<{ model: string }>(`/projects/${projectId}/ai-settings/test`, {
+        method: 'POST',
+        body: '{}',
+      });
+      setSettingsSuccess(`Gemini connection works with ${result.model}.`);
+    } catch (cause) {
+      setSettingsError(cause instanceof Error ? cause.message : 'Gemini connection failed');
+    } finally {
+      setSettingsSaving(false);
+    }
+  };
+
   const activeMode = MODES.find((m) => m.id === mode) ?? MODES[0]!;
   const activeChat = chats.find((c) => c.id === activeChatId);
   const openTabs = openTabIds
@@ -590,16 +823,20 @@ export function AiPanel({
         <div className="dl-ai-header-title">
           <span className="dl-ai-header-mark" aria-hidden="true" />
           <div>
-            <h2>Assistant</h2>
-            <p>{activeMode.hint}</p>
+            <h2>{showSettings ? 'AI Settings' : 'Assistant'}</h2>
+            <p>{showSettings ? 'Configure Gemini API key & model' : activeMode.hint}</p>
           </div>
         </div>
         <div className="dl-ai-header-actions">
           <button
             type="button"
             className={`dl-ai-icon-btn ${showHistory ? 'is-active' : ''}`}
-            onClick={() => setShowHistory((v) => !v)}
+            onClick={() => {
+              setShowHistory((v) => !v);
+              setShowSettings(false);
+            }}
             title="Chat history"
+            aria-label="Chat history"
             aria-pressed={showHistory}
           >
             <IconHistory />
@@ -609,8 +846,24 @@ export function AiPanel({
             className="dl-ai-icon-btn"
             onClick={() => void startNewChat()}
             title="New chat"
+            aria-label="New chat"
           >
             <IconPlus />
+          </button>
+          <button
+            type="button"
+            className={`dl-ai-icon-btn ${showSettings ? 'is-active' : ''}`}
+            onClick={() => {
+              setShowSettings((v) => !v);
+              setShowHistory(false);
+              setSettingsSuccess(null);
+              setSettingsError(null);
+            }}
+            title="AI settings"
+            aria-label="AI settings"
+            aria-pressed={showSettings}
+          >
+            <IconSettings />
           </button>
           {onCollapse ? (
             <button
@@ -644,7 +897,7 @@ export function AiPanel({
         </div>
       </header>
 
-      {!showHistory && openTabs.length > 0 ? (
+      {!showSettings && !showHistory && openTabs.length > 0 ? (
         <div className="dl-ai-tabs" role="tablist" aria-label="Open chats">
           {openTabs.map((tab) => (
             <button
@@ -675,7 +928,197 @@ export function AiPanel({
 
       {warning ? <div className="dl-ai-banner dl-ai-banner-warn">{warning}</div> : null}
 
-      {showHistory ? (
+      {!showSettings && !showHistory && settings && !settings.hasApiKey ? (
+        <div className="dl-ai-banner dl-ai-banner-warn flex items-center justify-between">
+          <span>Gemini API key is required.</span>
+          <button
+            type="button"
+            className="dl-ai-banner-action"
+            onClick={() => {
+              setShowSettings(true);
+              setShowHistory(false);
+            }}
+          >
+            Configure Key
+          </button>
+        </div>
+      ) : null}
+
+      {showSettings ? (
+        <div className="dl-ai-settings">
+          <div className="dl-ai-settings-card">
+            <div className="flex items-center justify-between">
+              <span className="dl-ai-section-label" style={{ margin: 0 }}>
+                Status
+              </span>
+              {settings?.hasApiKey ? (
+                <span className="dl-ai-status-badge is-active">
+                  <span className="dl-ai-status-dot" />
+                  API Key Configured
+                </span>
+              ) : (
+                <span className="dl-ai-status-badge is-warning">
+                  <span className="dl-ai-status-dot" />
+                  No API Key
+                </span>
+              )}
+            </div>
+            <p className="dl-ai-settings-description">
+              {settings?.hasApiKey
+                ? settings.hasCustomApiKey
+                  ? 'Custom project key active (stored encrypted).'
+                  : 'Server default Gemini key active.'
+                : 'A Google Gemini API key is required to use AI features.'}
+            </p>
+          </div>
+
+          {settingsSuccess ? (
+            <div className="dl-ai-banner dl-ai-banner-success" role="status">
+              {settingsSuccess}
+            </div>
+          ) : null}
+          {settingsError ? (
+            <div className="dl-ai-banner dl-ai-banner-warn" role="alert">
+              {settingsError}
+            </div>
+          ) : null}
+
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void saveSettings();
+            }}
+            autoComplete="off"
+            className="dl-ai-settings-form"
+          >
+            <div className="dl-ai-settings-field">
+              <label htmlFor="gemini-api-key">Gemini API Key</label>
+              <span className="dl-field-hint">
+                Stored encrypted at rest and never returned in plaintext.
+              </span>
+              <div className="dl-ai-settings-input-row">
+                <input
+                  id="gemini-api-key"
+                  type="text"
+                  name="gemini-api-token"
+                  style={
+                    { WebkitTextSecurity: showApiKey ? 'none' : 'disc' } as React.CSSProperties
+                  }
+                  data-1p-ignore="true"
+                  data-lpignore="true"
+                  data-bwignore="true"
+                  value={apiKeyInput}
+                  onChange={(e) => setApiKeyInput(e.target.value)}
+                  placeholder={
+                    settings?.hasApiKey
+                      ? '•••••••••••••••• (leave blank to keep current)'
+                      : 'AIzaSy...'
+                  }
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+                <button
+                  type="button"
+                  className="dl-ai-btn"
+                  onClick={() => setShowApiKey((v) => !v)}
+                  title={showApiKey ? 'Hide key' : 'Show key'}
+                >
+                  {showApiKey ? 'Hide' : 'Show'}
+                </button>
+              </div>
+              {settings?.hasCustomApiKey ? (
+                <div>
+                  <button
+                    type="button"
+                    className="text-xs text-[var(--dl-muted)] underline hover:text-[var(--dl-fg)]"
+                    onClick={() => void saveSettings({ clearApiKey: true })}
+                    disabled={settingsSaving}
+                  >
+                    Remove custom key (use server default)
+                  </button>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="dl-ai-settings-field">
+              <label htmlFor="gemini-model-select">Model</label>
+              <select
+                id="gemini-model-select"
+                value={selectedModel}
+                onChange={(e) => setSelectedModel(e.target.value)}
+                className="dl-ai-select"
+              >
+                {GEMINI_MODELS.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+                {!GEMINI_MODELS.includes(selectedModel) ? (
+                  <option value={selectedModel}>{selectedModel}</option>
+                ) : null}
+              </select>
+            </div>
+
+            <div className="dl-ai-settings-field">
+              <label htmlFor="gemini-custom-model">Custom model ID</label>
+              <input
+                id="gemini-custom-model"
+                value={selectedModel}
+                onChange={(event) => setSelectedModel(event.target.value)}
+                placeholder="gemini-3.8-flash"
+              />
+              <span className="dl-field-hint">
+                Use the exact text model ID from Google AI Studio. Save settings before testing.
+              </span>
+            </div>
+
+            <div className="dl-ai-settings-field">
+              <label htmlFor="gemini-policy-select">Policy</label>
+              <select
+                id="gemini-policy-select"
+                value={selectedPolicy}
+                onChange={(e) => setSelectedPolicy(e.target.value as 'any' | 'local_only')}
+                className="dl-ai-select"
+              >
+                <option value="any">Allow external AI (Gemini)</option>
+                <option value="local_only">Local only (block external calls)</option>
+              </select>
+              <span className="dl-field-hint">
+                If local-only, external requests to Gemini are blocked.
+              </span>
+            </div>
+
+            <div className="dl-ai-settings-actions">
+              <button
+                type="button"
+                className="dl-ai-btn"
+                disabled={settingsSaving}
+                onClick={() => void testConnection()}
+              >
+                Test saved connection
+              </button>
+              <button
+                type="button"
+                className="dl-ai-btn"
+                onClick={() => {
+                  setShowSettings(false);
+                  setSettingsSuccess(null);
+                  setSettingsError(null);
+                }}
+              >
+                Back to Chat
+              </button>
+              <button
+                type="submit"
+                className="dl-ai-btn dl-ai-btn-primary"
+                disabled={settingsSaving}
+              >
+                {settingsSaving ? 'Saving…' : 'Save Settings'}
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : showHistory ? (
         <div className="dl-ai-history">
           <p className="dl-ai-section-label">All chats</p>
           {chats.length === 0 ? (
@@ -746,6 +1189,26 @@ export function AiPanel({
                   <p className="dl-ai-empty-copy">(empty reply)</p>
                 ) : null}
 
+                {officeRevision(p.ops[0]) ? (
+                  <div className="dl-ai-bubble-body">
+                    {officeRevision(p.ops[0])!.action === 'replace' ? (
+                      <>
+                        <strong>Original text</strong>
+                        <pre className="whitespace-pre-wrap">
+                          {officeRevision(p.ops[0])!.originalText}
+                        </pre>
+                      </>
+                    ) : null}
+                    <strong>Proposed text</strong>
+                    <pre className="whitespace-pre-wrap">{officeRevision(p.ops[0])!.text}</pre>
+                    <p>
+                      {officeRevision(p.ops[0])!.action === 'replace'
+                        ? 'Select the original text in LibreOffice, then apply.'
+                        : 'Place the cursor in LibreOffice where you want this text, then apply.'}
+                    </p>
+                  </div>
+                ) : null}
+
                 {p.citedSourceIds?.length ? (
                   <div className="dl-ai-citations">
                     {p.citedSourceIds.map((id) => {
@@ -788,11 +1251,15 @@ export function AiPanel({
                   </div>
                 ) : null}
 
-                {p.status === 'pending' && p.mode !== 'ask' && p.mode !== 'auto' ? (
+                {p.status === 'pending' &&
+                p.mode !== 'ask' &&
+                p.mode !== 'auto' &&
+                p.ops.length > 0 ? (
                   <div className="dl-ai-actions">
                     <button
                       type="button"
                       className="dl-ai-btn dl-ai-btn-primary"
+                      disabled={busy}
                       onClick={() => void accept(p.id)}
                     >
                       Apply to document
@@ -814,16 +1281,32 @@ export function AiPanel({
             <div className="dl-ai-typing">
               <span className="dl-ai-spinner" />
               <span>
-                {mode === 'write' || mode === 'auto' ? 'Writing into document…' : 'Thinking…'}
+                {mode === 'write' || mode === 'auto' ? 'Preparing proposal…' : 'Thinking…'}
               </span>
             </div>
           ) : null}
         </div>
       )}
 
-      {!showHistory ? (
+      {!showHistory && !showSettings ? (
         <div className="dl-ai-composer-wrap">
-          {error ? <p className="dl-ai-error">{error}</p> : null}
+          {error ? (
+            <div className="dl-ai-error-wrap">
+              <p className="dl-ai-error">{error}</p>
+              {error.toLowerCase().includes('gemini') || error.toLowerCase().includes('key') ? (
+                <button
+                  type="button"
+                  className="dl-ai-error-action"
+                  onClick={() => {
+                    setShowSettings(true);
+                    setShowHistory(false);
+                  }}
+                >
+                  Configure Key
+                </button>
+              ) : null}
+            </div>
+          ) : null}
           <div className="dl-ai-composer">
             <textarea
               className="dl-ai-composer-input"
@@ -921,7 +1404,11 @@ export function AiPanel({
                     type="button"
                     className="dl-ai-send"
                     title={
-                      mode === 'ask' ? 'Send' : mode === 'auto' ? 'Send (auto)' : 'Send & apply'
+                      mode === 'ask'
+                        ? 'Send'
+                        : mode === 'auto'
+                          ? 'Send (auto)'
+                          : 'Generate proposal'
                     }
                     disabled={!instruction.trim()}
                     onClick={() => void run()}

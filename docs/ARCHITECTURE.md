@@ -49,6 +49,8 @@ AI providers must never write document content directly to the database.
 
 Pipeline: text proposal → revision/permission validation → preview → accept/reject → editor bridge → WOPI save/version history.
 
+The LibreOffice sidebar uses the office AI endpoint, which extracts context from the current immutable DOCX and stores validated `office-text` revisions in proposal metadata. Ask/Review generate answers without revisions; Edit/Write remain pending until explicit acceptance. Acceptance verifies a user-scoped writable WOPI session and the original file hash/version before Collabora executes a plain-text paste. Completion checks the newly saved DOCX before marking a proposal accepted. Legacy JSON operations are rejected for office-backed documents.
+
 ### Deterministic document processing
 
 Numbering, TOC, cross-references, DOCX/PDF, version history, and validation are handled by normal program logic — never by AI.

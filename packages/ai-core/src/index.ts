@@ -1,10 +1,7 @@
 export * from './types';
+export { buildOfficeMessages } from './office';
 export { packContext, buildMessages, buildWriteStreamMessages } from './context';
-export {
-  parseAiProposal,
-  validateAiProposal,
-  resolveDocumentOps,
-} from './validate';
+export { parseAiProposal, validateAiProposal, resolveDocumentOps } from './validate';
 export type { RoleForAi, ValidateAiProposalResult } from './validate';
 export type { ContextPack } from './context';
 export {

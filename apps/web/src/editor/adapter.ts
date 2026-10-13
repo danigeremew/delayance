@@ -26,6 +26,7 @@ export interface EditorAdapter {
   focus(): Promise<void>;
   save(): Promise<void>;
   getSaveState(): EditorSaveState;
+  getSessionToken(): string;
   getSelection(): Promise<EditorSelection>;
   getSelectedText(): Promise<string>;
   replaceSelection(handle: string, text: string): Promise<void>;

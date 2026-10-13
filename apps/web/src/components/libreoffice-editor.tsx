@@ -40,45 +40,101 @@ function normalizeUnoArgs(args?: Record<string, unknown>): Record<string, unknow
   return result;
 }
 
-class LibreOfficeEditorAdapter implements EditorAdapter {
+export class LibreOfficeEditorAdapter implements EditorAdapter {
   private state: EditorSaveState = 'loading';
   private readonly listeners = new Set<(state: EditorSaveState) => void>();
   private readonly pending = new Map<string, PendingRequest>();
+  private readonly selections = new Map<string, string>();
+  private saveRequest: { resolve: () => void; reject: (error: Error) => void } | null = null;
+  private pasteRequest: { resolve: () => void; reject: (error: Error) => void } | null = null;
 
   constructor(
     private readonly frame: HTMLIFrameElement,
     private readonly officeOrigin: string,
+    private readonly accessToken: string,
     private readonly onDocumentLoaded?: () => void,
-  ) {
-  }
+  ) {}
 
-  openDocument() { return Promise.resolve(); }
-  async focus() { this.send('Action_Focus'); }
-  async save() { this.setState('saving'); this.send('Action_Save'); }
-  getSaveState() { return this.state; }
-  async getSelection() { return this.requestSelection(); }
-  async getSelectedText() { return (await this.getSelection()).text; }
+  openDocument() {
+    return Promise.resolve();
+  }
+  async focus() {
+    this.send('Action_Focus');
+  }
+  async save(): Promise<void> {
+    if (this.state === 'loading') throw new Error('Wait for LibreOffice to load.');
+    if (this.saveRequest) throw new Error('A save is already in progress.');
+    // Exporting an unchanged DOCX can change its binary hash and invalidate a proposal.
+    if (this.state === 'saved') return;
+    return new Promise((resolve, reject) => {
+      const timeout = window.setTimeout(() => {
+        this.saveRequest = null;
+        this.setState('error');
+        reject(new Error('LibreOffice did not confirm the save. Retry saving before using AI.'));
+      }, 30000);
+      this.saveRequest = {
+        resolve: () => {
+          window.clearTimeout(timeout);
+          resolve();
+        },
+        reject: (error) => {
+          window.clearTimeout(timeout);
+          reject(error);
+        },
+      };
+      this.setState('saving');
+      this.send('Action_Save', { Notify: true, DontSaveIfUnmodified: false });
+    });
+  }
+  getSaveState() {
+    return this.state;
+  }
+  getSessionToken() {
+    return this.accessToken;
+  }
+  async getSelection() {
+    return this.requestSelection();
+  }
+  async getSelectedText() {
+    return (await this.getSelection()).text;
+  }
   async replaceSelection(handle: string, text: string) {
-    this.send('Delayance_ReplaceSelection', { handle, text });
+    await this.pasteAtSelection(handle, text);
   }
   async insertText(handle: string, text: string) {
-    this.send('Delayance_InsertText', { handle, text });
+    if (this.selections.get(handle) !== '')
+      throw new Error('Place the cursor without selecting text before inserting.');
+    await this.pasteAtSelection(handle, text);
   }
   async navigateTo(location: DocumentLocation) {
     this.send('Delayance_NavigateTo', { location });
   }
   async executeCommand(command: EditorCommand) {
     if (command.type === 'save') return this.save();
-    if (command.type === 'undo') return void this.send('Send_UNO_Command', { Command: '.uno:Undo' });
-    if (command.type === 'redo') return void this.send('Send_UNO_Command', { Command: '.uno:Redo' });
-    if (command.type === 'find') return void this.send('Send_UNO_Command', { Command: '.uno:SearchDialog' });
+    if (command.type === 'undo')
+      return void this.send('Send_UNO_Command', { Command: '.uno:Undo' });
+    if (command.type === 'redo')
+      return void this.send('Send_UNO_Command', { Command: '.uno:Redo' });
+    if (command.type === 'find')
+      return void this.send('Send_UNO_Command', { Command: '.uno:SearchDialog' });
     this.send('Send_UNO_Command', {
       Command: command.command,
       Args: normalizeUnoArgs(command.args),
     });
   }
-  subscribe(listener: (state: EditorSaveState) => void) { this.listeners.add(listener); return () => this.listeners.delete(listener); }
-  dispose() { for (const pending of this.pending.values()) pending.reject(new Error('Editor disposed')); this.pending.clear(); this.listeners.clear(); }
+  subscribe(listener: (state: EditorSaveState) => void) {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+  dispose() {
+    this.pasteRequest?.reject(new Error('Editor disposed'));
+    this.pasteRequest = null;
+    this.saveRequest?.reject(new Error('Editor disposed'));
+    this.saveRequest = null;
+    for (const pending of this.pending.values()) pending.reject(new Error('Editor disposed'));
+    this.pending.clear();
+    this.listeners.clear();
+  }
 
   ready() {
     this.send('Host_PostmessageReady');
@@ -93,6 +149,10 @@ class LibreOfficeEditorAdapter implements EditorAdapter {
     this.send('Hide_Toolbar');
     this.send('Hide_Statusbar');
     this.send('Hide_Ruler');
+    this.send('Send_UNO_Command', {
+      Command: '.uno:InvertBackground',
+      Args: { NewTheme: { type: 'string', value: 'Light' } },
+    });
     this.send('Send_UNO_Command', { Command: '.uno:SidebarHide' });
     this.send('Send_UNO_Command', { Command: '.uno:CloseSidebar' });
   }
@@ -118,8 +178,38 @@ class LibreOfficeEditorAdapter implements EditorAdapter {
         setTimeout(() => this.applyCleanUI(), 600);
       }
     }
-    if (row.MessageId === 'Document_ModifiedStatus') this.setState(row.Values?.Modified ? 'dirty' : 'saved');
-    if (row.MessageId === 'Action_Save_Resp') this.setState(row.Values?.success === false ? 'error' : 'saved');
+    if (row.MessageId === 'Doc_ModifiedStatus' || row.MessageId === 'Document_ModifiedStatus') {
+      this.setState(row.Values?.Modified ? 'dirty' : 'saved');
+      if (row.Values?.Modified === true) {
+        this.pasteRequest?.resolve();
+        this.pasteRequest = null;
+      }
+    }
+    if (row.MessageId === 'Action_Save_Resp') {
+      const request = this.saveRequest;
+      this.saveRequest = null;
+      if (row.Values?.success === true) {
+        this.setState('saved');
+        request?.resolve();
+      } else {
+        this.setState('error');
+        request?.reject(new Error('LibreOffice could not save the document.'));
+      }
+    }
+    if (row.MessageId === 'Action_Copy_Resp') {
+      const entry = this.pending.entries().next().value;
+      if (!entry) return;
+      const [id, pending] = entry;
+      this.pending.delete(id);
+      const text = row.Values?.content;
+      if (typeof text !== 'string') {
+        pending.reject(new Error('Invalid LibreOffice selection response.'));
+        return;
+      }
+      this.selections.clear();
+      this.selections.set(id, text);
+      pending.resolve({ text, isCollapsed: !text, handle: id });
+    }
     if (row.MessageId === 'Delayance_Selection') {
       const id = String(row.Values?.requestId ?? '');
       const pending = this.pending.get(id);
@@ -133,18 +223,58 @@ class LibreOfficeEditorAdapter implements EditorAdapter {
     }
   }
 
+  private async pasteAtSelection(handle: string, text: string) {
+    if (!this.selections.has(handle))
+      throw new Error('Capture the current selection before applying.');
+    const expected = this.selections.get(handle);
+    const current = await this.getSelection();
+    if (current.text !== expected)
+      throw new Error('The selection changed. Select the original text again.');
+    if (!text.trim()) throw new Error('No text to apply.');
+    // Paste is a binary WebSocket message; wait for LibreOffice to process it before saving.
+    await new Promise<void>((resolve, reject) => {
+      const timeout = window.setTimeout(() => {
+        this.pasteRequest = null;
+        reject(new Error('LibreOffice did not confirm the text insertion.'));
+      }, 10000);
+      this.pasteRequest = {
+        resolve: () => {
+          window.clearTimeout(timeout);
+          resolve();
+        },
+        reject: (error) => {
+          window.clearTimeout(timeout);
+          reject(error);
+        },
+      };
+      this.send('Action_Paste', { Mimetype: 'text/plain;charset=utf-8', Data: text });
+      this.selections.clear();
+    });
+  }
+
   private requestSelection(): Promise<EditorSelection> {
+    if (this.state === 'loading') return Promise.reject(new Error('Wait for LibreOffice to load.'));
+    if (this.pending.size)
+      return Promise.reject(new Error('A selection request is already pending.'));
     const requestId = crypto.randomUUID();
-    this.send('Delayance_GetSelection', { requestId });
     return new Promise((resolve, reject) => {
       const timeout = window.setTimeout(() => {
         this.pending.delete(requestId);
-        reject(new Error('The installed Collabora bridge does not provide selection access yet.'));
-      }, 3_000);
+        reject(
+          new Error('This Collabora version does not support selection access (Action_Copy).'),
+        );
+      }, 5000);
       this.pending.set(requestId, {
-        resolve: (value) => { window.clearTimeout(timeout); resolve(value); },
-        reject: (error) => { window.clearTimeout(timeout); reject(error); },
+        resolve: (value) => {
+          window.clearTimeout(timeout);
+          resolve(value);
+        },
+        reject: (error) => {
+          window.clearTimeout(timeout);
+          reject(error);
+        },
       });
+      this.send('Action_Copy', { Mimetype: 'text/plain;charset=utf-8' });
     });
   }
 
@@ -156,8 +286,17 @@ class LibreOfficeEditorAdapter implements EditorAdapter {
     };
     this.frame.contentWindow?.postMessage(JSON.stringify(payload), this.officeOrigin);
   }
-  private setState(state: EditorSaveState) { this.state = state; this.listeners.forEach((listener) => listener(state)); }
-  private parse(value: string) { try { return JSON.parse(value); } catch { return null; } }
+  private setState(state: EditorSaveState) {
+    this.state = state;
+    this.listeners.forEach((listener) => listener(state));
+  }
+  private parse(value: string) {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
 }
 
 export function LibreOfficeEditor({
@@ -188,16 +327,26 @@ export function LibreOfficeEditor({
     let active = true;
     setSession(null);
     setIsLoaded(false);
-    void apiFetch<OfficeSession>(`/projects/${projectId}/documents/${documentId}/office/session`, { method: 'POST', body: '{}' })
+    void apiFetch<OfficeSession>(`/projects/${projectId}/documents/${documentId}/office/session`, {
+      method: 'POST',
+      body: '{}',
+    })
       .then((value) => active && setSession(value))
-      .catch((cause) => active && setError(cause instanceof Error ? cause.message : 'Unable to open LibreOffice'));
-    return () => { active = false; };
+      .catch(
+        (cause) =>
+          active && setError(cause instanceof Error ? cause.message : 'Unable to open LibreOffice'),
+      );
+    return () => {
+      active = false;
+    };
   }, [projectId, documentId]);
 
   useEffect(() => {
     if (!session || !frame.current) return;
     const origin = new URL(session.actionUrl).origin;
-    const adapter = new LibreOfficeEditorAdapter(frame.current, origin, () => setIsLoaded(true));
+    const adapter = new LibreOfficeEditorAdapter(frame.current, origin, session.accessToken, () =>
+      setIsLoaded(true),
+    );
     adapterRef.current = adapter;
     const handler = (event: MessageEvent) => adapter.handleMessage(event);
     window.addEventListener('message', handler);
@@ -219,8 +368,14 @@ export function LibreOfficeEditor({
     adapterRef.current?.ready();
   }, []);
 
-  if (error) return <div className="flex flex-1 items-center justify-center text-red-600">{error}</div>;
-  if (!session) return <div className="flex flex-1 items-center justify-center text-[var(--dl-muted)]">Opening LibreOffice Writer…</div>;
+  if (error)
+    return <div className="flex flex-1 items-center justify-center text-red-600">{error}</div>;
+  if (!session)
+    return (
+      <div className="flex flex-1 items-center justify-center text-[var(--dl-muted)]">
+        Opening LibreOffice Writer…
+      </div>
+    );
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col bg-[var(--dl-bg)] overflow-hidden">
@@ -237,7 +392,7 @@ export function LibreOfficeEditor({
         <input name="access_token_ttl" value={String(session.accessTokenTtl)} readOnly />
         <input
           name="ui_defaults"
-          value="UIMode=compact;ShowSidebar=false;TextSidebar=false;Sidebar=false;ShowProperties=false;ShowMenubar=false;ShowToolbar=false;ShowStatusbar=false;ShowRuler=false;TextMenubar=false;TextStatusbar=false;TextRuler=false;UITheme=light;SaveAsMode=group"
+          value="UIMode=compact;ShowSidebar=false;TextSidebar=false;Sidebar=false;ShowProperties=false;ShowMenubar=false;ShowToolbar=false;ShowStatusbar=false;ShowRuler=false;TextMenubar=false;TextStatusbar=false;TextRuler=false;UITheme=light;SavedUIState=false;SaveAsMode=group"
           readOnly
         />
       </form>

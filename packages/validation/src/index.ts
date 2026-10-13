@@ -14,10 +14,35 @@ export const aiSettingsSchema = z
   })
   .strict();
 
+export const officeAiRequestSchema = z.object({
+  instruction: z.string().trim().min(1).max(20000),
+  mode: z.enum(['auto', 'ask', 'edit', 'write', 'review']),
+  preferredMode: z.enum(['edit', 'write']).optional(),
+  chatId: z.string().uuid().optional(),
+  selectedText: z.string().max(50000).default(''),
+});
+
+export const officeTextRevisionSchema = z
+  .object({
+    type: z.literal('office-text'),
+    action: z.enum(['insert', 'replace']),
+    originalText: z.string().max(50000),
+    text: z.string().min(1).max(100000),
+    fileHash: z.string().regex(/^[a-f0-9]{64}$/),
+    version: z.number().int().nonnegative(),
+  })
+  .strict();
+
+export const officeAiAcceptanceSchema = z
+  .object({
+    accessToken: z.string().min(1).max(2000),
+  })
+  .strict();
+
 export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   GEMINI_API_KEY: z.string().trim().optional(),
-  GEMINI_MODEL: geminiModelSchema.default('gemini-2.5-flash'),
+  GEMINI_MODEL: geminiModelSchema.default('gemini-3.8-flash'),
   API_PORT: z.coerce.number().default(48722),
   DATABASE_URL: z.string().min(1),
   REDIS_URL: z.string().min(1),

@@ -22,7 +22,7 @@ const EDIT_RE =
   /\b(edit|rewrite|revis|rephras|fix|correct|update|change|modify|improve|tighten|shorten|expand (this|the|it)|replace|delete|remove|clear|rename|move|promote|demote|fix up|clean up)\b/i;
 
 const WRITE_RE =
-  /\b(write|draft|compose|create|generate|add (a |an |the )?(new )?(section|chapter|paragraph|intro|conclusion)|insert|append|start (a |the )?document|fill (in|out)|produce)\b/i;
+  /\b(write|wrtie|wirte|draft|compose|create|generate|add (a |an |the )?(new )?(section|chapter|paragraph|intro|conclusion)|insert|append|start (a |the )?document|fill (in|out)|produce)\b/i;
 
 const EDIT_ONLY_RE =
   /\b(delete|remove|clear|rename|move|promote|demote|fix (typo|grammar|spelling)|correct the|change .+ to)\b/i;
@@ -105,9 +105,7 @@ export function classifyAiIntent(instruction: string): IntentClassification {
 
   // "Add more…" / "include …" without naming a new section is often ambiguous.
   if (
-    /\b(add more|add detail|add details|include more|expand on|go deeper|flesh out)\b/i.test(
-      text,
-    )
+    /\b(add more|add detail|add details|include more|expand on|go deeper|flesh out)\b/i.test(text)
   ) {
     return {
       mode: null,
@@ -132,7 +130,7 @@ export function classifyAiIntent(instruction: string): IntentClassification {
       mode: 'write',
       needsClarification: false,
       reason: 'Prompt asks to add new content',
-      confidence: 'medium',
+      confidence: 'high',
     };
   }
 
@@ -146,11 +144,7 @@ export function classifyAiIntent(instruction: string): IntentClassification {
   }
 
   // Vague imperative like "make this better" / "do something about X"
-  if (
-    /\b(make|do|put|get|please)\b/i.test(text) &&
-    !asks &&
-    text.split(/\s+/).length <= 12
-  ) {
+  if (/\b(make|do|put|get|please)\b/i.test(text) && !asks && text.split(/\s+/).length <= 12) {
     return {
       mode: null,
       needsClarification: true,
@@ -198,9 +192,7 @@ export function parseIntentClassification(raw: unknown): IntentClassification | 
       ? modeRaw
       : null;
   const reason =
-    typeof obj.reason === 'string' && obj.reason.trim()
-      ? obj.reason.trim()
-      : 'Classified by model';
+    typeof obj.reason === 'string' && obj.reason.trim() ? obj.reason.trim() : 'Classified by model';
 
   if (needsClarification || mode === null) {
     return {

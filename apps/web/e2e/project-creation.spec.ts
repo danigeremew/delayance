@@ -39,13 +39,30 @@ test('creates a project without AI setup', async ({ page }) => {
     }
     return route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
   });
-  await page.route(`${API}/projects/00000000-0000-4000-8000-000000000002**`, (route) =>
-    route.fulfill({
+  await page.route(`${API}/projects/00000000-0000-4000-8000-000000000002**`, (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith('/office/session')) {
+      return route.fulfill({
+        status: 503,
+        contentType: 'application/json',
+        body: JSON.stringify({ message: 'Editor not needed for this project creation test' }),
+      });
+    }
+    const body = path.endsWith('/documents')
+      ? route.request().method() === 'POST'
+        ? { id: '00000000-0000-4000-8000-000000000003', title: 'Untitled document' }
+        : []
+      : path.endsWith('/documents/00000000-0000-4000-8000-000000000003')
+        ? { title: 'Untitled document' }
+        : path.endsWith('/ai-settings')
+          ? { provider: 'gemini', model: 'gemini-3.8-flash', policy: 'any', hasApiKey: false }
+          : [];
+    return route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: '{}',
-    }),
-  );
+      body: JSON.stringify(body),
+    });
+  });
   await page.goto('/projects');
   await page.getByRole('button', { name: 'Create new project' }).first().click();
   await expect(page.getByRole('heading', { name: 'Create project' })).toBeVisible();
@@ -54,5 +71,8 @@ test('creates a project without AI setup', async ({ page }) => {
   await page.getByRole('textbox', { name: 'Project name' }).fill('Gemini project');
   await page.getByRole('textbox', { name: 'Description (optional)' }).fill('A brief');
   await page.getByRole('button', { name: 'Create project' }).click();
-  await expect(page).toHaveURL(/\/projects\/00000000-0000-4000-8000-000000000002$/);
+  await expect(page).toHaveURL(
+    /\/projects\/00000000-0000-4000-8000-000000000002\/documents\/00000000-0000-4000-8000-000000000003$/,
+  );
+  await expect(page.getByRole('heading', { name: 'Untitled document', exact: true })).toBeVisible();
 });

@@ -865,12 +865,177 @@ body {
   color: color-mix(in srgb, #8a4b12 70%, var(--dl-fg));
 }
 
+.dl-ai-banner-success {
+  border: 1px solid color-mix(in srgb, #12b76a 35%, var(--dl-border));
+  background: color-mix(in srgb, #12b76a 10%, var(--dl-panel));
+  color: color-mix(in srgb, #027a48 70%, var(--dl-fg));
+}
+
+.dl-ai-banner-action {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  padding: 0;
+  margin-left: 0.5rem;
+}
+
 .dl-ai-thread,
-.dl-ai-history {
+.dl-ai-history,
+.dl-ai-settings {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   padding: 0.85rem;
+}
+
+.dl-ai-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.dl-ai-settings-card {
+  padding: 0.75rem 0.85rem;
+  border-radius: 8px;
+  border: 1px solid var(--dl-border);
+  background: color-mix(in srgb, var(--dl-bg) 60%, var(--dl-panel));
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.dl-ai-settings-description {
+  margin: 0;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  color: var(--dl-muted);
+}
+
+.dl-ai-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 6px;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.dl-ai-status-badge.is-active {
+  background: color-mix(in srgb, #12b76a 12%, transparent);
+  color: #027a48;
+  border: 1px solid color-mix(in srgb, #12b76a 28%, transparent);
+}
+
+.dl-ai-status-badge.is-warning {
+  background: color-mix(in srgb, #f79009 12%, transparent);
+  color: #b54708;
+  border: 1px solid color-mix(in srgb, #f79009 28%, transparent);
+}
+
+.dl-ai-status-dot {
+  width: 0.42rem;
+  height: 0.42rem;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.dl-ai-settings-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.dl-ai-settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.dl-ai-settings-field label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--dl-fg);
+}
+
+.dl-ai-settings-field .dl-field-hint {
+  font-size: 0.7rem;
+  color: var(--dl-muted);
+  line-height: 1.35;
+}
+
+.dl-ai-settings-input-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.dl-ai-settings-input-row input {
+  flex: 1;
+  font-size: 0.8rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: 6px;
+  border: 1px solid var(--dl-border);
+  background: var(--dl-bg);
+  color: var(--dl-fg);
+  font-family: inherit;
+}
+
+.dl-ai-settings-input-row input:focus {
+  outline: none;
+  border-color: var(--dl-accent);
+}
+
+.dl-ai-select {
+  font-size: 0.8rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: 6px;
+  border: 1px solid var(--dl-border);
+  background: var(--dl-bg);
+  color: var(--dl-fg);
+  font-family: inherit;
+}
+
+.dl-ai-select:focus {
+  outline: none;
+  border-color: var(--dl-accent);
+}
+
+.dl-ai-settings-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.45rem;
+  margin-top: 0.35rem;
+  padding-top: 0.65rem;
+  border-top: 1px solid var(--dl-border);
+}
+
+.dl-ai-error-wrap {
+  margin: 0 0 0.45rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.dl-ai-error-wrap .dl-ai-error {
+  margin: 0;
+}
+
+.dl-ai-error-action {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--dl-accent);
+  background: transparent;
+  border: 0;
+  text-decoration: underline;
+  cursor: pointer;
+  white-space: nowrap;
 }
 
 .dl-ai-section-label {
