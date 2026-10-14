@@ -6,7 +6,7 @@ if [[ "${NODE_ENV:-development}" == "production" ]]; then
   exit 1
 fi
 
-echo 'This removes local Delayance PostgreSQL, Redis, MinIO, and Keycloak volumes.'
+echo 'This removes local Delayance PostgreSQL, Redis, and MinIO volumes.'
 read -r -p 'Type RESET to continue: ' confirmation
 [[ "$confirmation" == RESET ]] || { echo 'Cancelled.'; exit 1; }
 docker compose -f infra/docker-compose.yml down -v

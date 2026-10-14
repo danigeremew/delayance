@@ -13,7 +13,8 @@
     "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\"",
     "reset:dev": "bash scripts/reset-dev.sh",
     "wordcraft:prepare": "node scripts/wordcraft.mjs prepare",
-    "wordcraft:build": "node scripts/wordcraft.mjs build"
+    "wordcraft:build": "node scripts/wordcraft.mjs build",
+    "auth:password": "pnpm --filter @delayance/api auth:password"
   },
   "devDependencies": {
     "prettier": "^3.5.3",

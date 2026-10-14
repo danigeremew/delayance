@@ -2,7 +2,7 @@ import { test, expect, request } from '@playwright/test';
 
 const API = process.env.PLAYWRIGHT_API_URL ?? 'http://localhost:48722';
 
-test.describe('Keycloak authentication boundary', () => {
+test.describe('Local authentication boundary', () => {
   test('returns 401 for a missing token so the browser can refresh its session', async () => {
     const api = await request.newContext({ baseURL: API });
     try {

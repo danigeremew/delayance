@@ -2,7 +2,7 @@
 
 - The `experiment/wordcraft-editor` branch embeds an alpha Wordcraft build. DOCX fidelity and pagination require evaluation on representative copies. Its native ribbon supplies editing tools; unsupported Delayance host commands are rejected; non-DOCX native exports download locally. See [the integration guide](../integrations/wordcraft/README.md).
 
-- Email/password login is brokered by the Delayance API through Keycloak Direct Access Grants. Browser-only Keycloak required actions, broker login, and SSO are not available in these forms.
+- Authentication is local email/password login. External identity providers and SSO are not implemented. Accounts previously created through Keycloak need a local password reset; their user IDs and projects are preserved.
 - Password-recovery mail is unavailable until SMTP is configured.
 
 - No real-time multiplayer editing (collaboration app is a scaffold only).

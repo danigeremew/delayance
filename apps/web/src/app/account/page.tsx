@@ -41,7 +41,7 @@ export default function AccountPage() {
           <div>
             <h1 className="text-2xl font-bold">Account Settings</h1>
             <p className="mt-1 text-sm text-[var(--dl-muted)]">
-              Manage your Delayance profile and identity session.
+              Manage your Delayance profile and login session.
             </p>
           </div>
         </div>
@@ -84,7 +84,7 @@ export default function AccountPage() {
       <section className="rounded-lg border border-[var(--dl-border)] bg-[var(--dl-panel)] p-6">
         <h2 className="text-lg font-semibold">Security</h2>
         <p className="mt-1 text-xs text-[var(--dl-muted)]">
-          Passwords are stored by Keycloak. Use Delayance recovery to change yours.
+          Use Delayance password recovery to change your password.
         </p>
         <Link
           href="/forgot-password"

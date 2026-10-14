@@ -30,21 +30,6 @@ services:
       timeout: 3s
       retries: 10
 
-  keycloak:
-    # Development-only identity provider; pin upgrades as explicit changes.
-    image: quay.io/keycloak/keycloak:26.7.4
-    container_name: delayance-keycloak
-    command: start-dev --import-realm
-    environment:
-      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME:-admin}
-      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-change-me-now}
-    ports:
-      - '127.0.0.1:58741:8080'
-    volumes:
-      - keycloak_data:/opt/keycloak/data
-      - ./keycloak:/opt/keycloak/data/import:ro
-    restart: unless-stopped
-
   minio:
     image: quay.io/minio/minio:latest
     container_name: delayance-minio
@@ -105,4 +90,3 @@ volumes:
   postgres_data:
   redis_data:
   minio_data:
-  keycloak_data:

@@ -1,18 +1,19 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   UnauthorizedException,
-  BadRequestException,
-  ServiceUnavailableException,
 } from '@nestjs/common';
-import { createHash, createPublicKey, randomBytes, verify as verifySignature } from 'node:crypto';
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { SignJWT, jwtVerify } from 'jose';
 import { z } from 'zod';
 import nodemailer from 'nodemailer';
-import { eq } from 'drizzle-orm';
+import { and, eq, gt, isNull, sql } from 'drizzle-orm';
 import { AppConfigService } from '../config/app-config.service';
 import { DatabaseService } from '../database/database.service';
 import { RedisService } from '../redis/redis.service';
-import { auditEvents, users } from '../database/schema';
+import { auditEvents, sessions, users } from '../database/schema';
+import { hashPassword, verifyPassword } from './password';
 
 export interface AuthUser {
   id: string;
@@ -24,270 +25,192 @@ export interface AuthSession {
   expiresIn: number;
   user: AuthUser;
 }
-interface Claims {
-  sub: string;
-  email?: string;
-  name?: string;
-  preferred_username?: string;
-  iss: string;
-  aud?: string | string[];
-  exp: number;
-  nonce?: string;
-}
-const tokenResponse = z.object({
-  access_token: z.string().min(1),
-  refresh_token: z.string().min(1),
-  expires_in: z.number().int().positive(),
-  refresh_expires_in: z.number().int().nonnegative().optional(),
-});
-const adminTokenResponse = z.object({ access_token: z.string().min(1) });
-const keycloakUserResponse = z.array(
-  z.object({ id: z.string(), email: z.string().optional() }).passthrough(),
-);
 interface AuthTokens extends AuthSession {
   refreshToken: string;
-  refreshExpiresIn?: number;
+  refreshExpiresIn: number;
 }
-
-interface Jwk {
-  kty: string;
-  n?: string;
-  e?: string;
-  kid?: string;
-  alg?: string;
-  use?: string;
+const ACCESS_SECONDS = 900;
+const SESSION_SECONDS = 86400;
+const claimsSchema = z.object({ sub: z.string().uuid(), sid: z.string().uuid() });
+const refreshSchema = z.string().regex(/^[a-f0-9-]{36}\.[A-Za-z0-9_-]{43}$/);
+const digest = (token: string) => createHash('sha256').update(token).digest('hex');
+const publicUser = (user: AuthUser): AuthUser => ({
+  id: user.id,
+  email: user.email,
+  name: user.name,
+});
+function refreshId(token: string): string | null {
+  if (!refreshSchema.safeParse(token).success) return null;
+  const id = token.split('.')[0];
+  return z.string().uuid().safeParse(id).success ? id! : null;
 }
 
 @Injectable()
 export class AuthService {
-  private jwks: { expiresAt: number; keys: Record<string, Jwk> } | null = null;
   constructor(
     private readonly database: DatabaseService,
     private readonly config: AppConfigService,
     private readonly redis: RedisService,
   ) {}
-  private get issuer() {
-    return this.config.env.KEYCLOAK_ISSUER_URL.replace(/\/$/, '');
-  }
-  private get tokenUrl() {
-    return `${this.issuer}/protocol/openid-connect/token`;
-  }
-  private get adminUsersUrl() {
-    return `${this.config.env.KEYCLOAK_BASE_URL.replace(/\/$/, '')}/admin/realms/${encodeURIComponent(this.config.env.KEYCLOAK_REALM)}/users`;
-  }
-  private async request(url: string, init?: RequestInit): Promise<Response> {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 8000);
-    try {
-      return await fetch(url, { ...init, signal: controller.signal });
-    } catch {
-      throw new ServiceUnavailableException('Identity provider unavailable');
-    } finally {
-      clearTimeout(timeout);
-    }
-  }
-  private async json<T>(url: string, init?: RequestInit): Promise<T> {
-    const response = await this.request(url, init);
-    if (!response.ok) throw new ServiceUnavailableException('Identity provider unavailable');
-    try {
-      return (await response.json()) as T;
-    } catch {
-      throw new ServiceUnavailableException('Invalid identity provider response');
-    }
-  }
-  private async passwordGrant(email: string, password: string): Promise<AuthTokens> {
-    const response = await this.request(this.tokenUrl, {
-      method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        grant_type: 'password',
-        client_id: this.config.env.KEYCLOAK_CLIENT_ID,
-        client_secret: this.config.env.KEYCLOAK_CLIENT_SECRET,
-        username: email,
-        password,
-        scope: 'openid profile email',
-      }),
+  private findUser(email: string) {
+    return this.database.db.query.users.findFirst({
+      where: sql`lower(${users.email}) = ${email.trim().toLowerCase()}`,
     });
-    if (response.status === 400 || response.status === 401)
-      throw new UnauthorizedException('Invalid email or password');
-    if (!response.ok) throw new ServiceUnavailableException('Identity provider unavailable');
-    let tokens: z.infer<typeof tokenResponse>;
-    try {
-      tokens = tokenResponse.parse(await response.json());
-    } catch {
-      throw new ServiceUnavailableException('Invalid identity provider response');
-    }
-    const user = await this.provision(await this.verifyToken(tokens.access_token));
+  }
+  private async accessToken(userId: string, sessionId: string) {
+    return new SignJWT({ sid: sessionId })
+      .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
+      .setSubject(userId)
+      .setIssuer('delayance')
+      .setAudience('delayance-api')
+      .setIssuedAt()
+      .setExpirationTime(`${ACCESS_SECONDS}s`)
+      .sign(new TextEncoder().encode(this.config.env.AUTH_JWT_SECRET));
+  }
+  private async startSession(user: AuthUser): Promise<AuthTokens> {
+    const sessionId = randomUUID();
+    const refreshToken = `${sessionId}.${randomBytes(32).toString('base64url')}`;
+    await this.database.db.insert(sessions).values({
+      id: sessionId,
+      userId: user.id,
+      refreshTokenHash: digest(refreshToken),
+      expiresAt: new Date(Date.now() + SESSION_SECONDS * 1000),
+    });
     return {
-      accessToken: tokens.access_token,
-      expiresIn: tokens.expires_in,
-      refreshToken: tokens.refresh_token,
-      refreshExpiresIn: tokens.refresh_expires_in,
-      user,
+      accessToken: await this.accessToken(user.id, sessionId),
+      expiresIn: ACCESS_SECONDS,
+      refreshToken,
+      refreshExpiresIn: SESSION_SECONDS,
+      user: publicUser(user),
     };
   }
-  async login(input: { email: string; password: string }) {
-    return this.passwordGrant(input.email, input.password);
+  async login(input: { email: string; password: string }): Promise<AuthTokens> {
+    const user = await this.findUser(input.email);
+    const valid = await verifyPassword(input.password, user?.passwordHash ?? null);
+    if (!user || !valid) throw new UnauthorizedException('Invalid email or password');
+    return this.startSession(user);
   }
-  private async adminToken(): Promise<string> {
-    const response = await this.request(this.tokenUrl, {
-      method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        grant_type: 'client_credentials',
-        client_id: this.config.env.KEYCLOAK_PROVISIONER_CLIENT_ID,
-        client_secret: this.config.env.KEYCLOAK_PROVISIONER_CLIENT_SECRET,
-      }),
-    });
-    if (!response.ok) throw new ServiceUnavailableException('Account management unavailable');
-    try {
-      return adminTokenResponse.parse(await response.json()).access_token;
-    } catch {
-      throw new ServiceUnavailableException('Invalid identity provider response');
-    }
-  }
-  async register(input: { email: string; firstName: string; lastName: string; password: string }) {
-    // Never attach an existing local account to a new identity on the basis of email.
-    const existing = await this.database.db.query.users.findFirst({
-      where: eq(users.email, input.email),
-    });
-    if (existing) throw new ConflictException('Email already belongs to a Delayance account');
-    const adminToken = await this.adminToken();
-    const response = await this.request(this.adminUsersUrl, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        username: input.email,
-        email: input.email,
-        firstName: input.firstName,
-        lastName: input.lastName,
-        enabled: true,
-        emailVerified: false,
-        credentials: [{ type: 'password', value: input.password, temporary: false }],
-      }),
-    });
-    if (response.status === 409)
+  async register(input: {
+    email: string;
+    firstName: string;
+    lastName: string;
+    password: string;
+  }): Promise<AuthTokens> {
+    const email = input.email.trim().toLowerCase();
+    if (await this.findUser(email))
       throw new ConflictException('An account with this email already exists');
-    if (response.status === 400)
-      throw new BadRequestException('Account details do not meet the identity provider policy');
-    if (!response.ok) throw new ServiceUnavailableException('Account creation unavailable');
-    return this.passwordGrant(input.email, input.password);
-  }
-  private async findIdentity(email: string, adminToken: string): Promise<string | null> {
-    const url = new URL(this.adminUsersUrl);
-    url.searchParams.set('email', email);
-    url.searchParams.set('exact', 'true');
-    const response = await this.request(url.toString(), {
-      headers: { Authorization: `Bearer ${adminToken}` },
+    const passwordHash = await hashPassword(input.password);
+    const [user] = await this.database.db
+      .insert(users)
+      .values({
+        email,
+        name: `${input.firstName.trim()} ${input.lastName.trim()}`.trim(),
+        passwordHash,
+      })
+      .onConflictDoNothing()
+      .returning();
+    if (!user) throw new ConflictException('An account with this email already exists');
+    await this.database.db.insert(auditEvents).values({
+      actorId: user.id,
+      action: 'user.registered',
+      entityType: 'user',
+      entityId: user.id,
     });
-    if (!response.ok) throw new ServiceUnavailableException('Account management unavailable');
-    let identities: z.infer<typeof keycloakUserResponse>;
-    try {
-      identities = keycloakUserResponse.parse(await response.json());
-    } catch {
-      throw new ServiceUnavailableException('Invalid identity provider response');
-    }
-    return identities.find((user) => user.email?.toLowerCase() === email)?.id ?? null;
+    return this.startSession(user);
   }
-  async forgotPassword(email: string): Promise<void> {
-    // Always return the same response, including when identity lookup or mail delivery fails.
-    try {
-      const adminToken = await this.adminToken();
-      const subject = await this.findIdentity(email, adminToken);
-      if (!subject || !this.config.env.SMTP_HOST || !this.config.env.SMTP_FROM) return;
-      const token = randomBytes(32).toString('base64url');
-      const hash = createHash('sha256').update(token).digest('hex');
-      await this.redis.client.set(`password-reset:${hash}`, subject, 'EX', 900, 'NX');
-      const link = `${this.config.env.WEB_ORIGIN}/reset-password#token=${encodeURIComponent(token)}`;
-      const transporter = nodemailer.createTransport({
-        host: this.config.env.SMTP_HOST,
-        port: this.config.env.SMTP_PORT,
-        secure: this.config.env.SMTP_SECURE,
-        auth:
-          this.config.env.SMTP_USER && this.config.env.SMTP_PASSWORD
-            ? { user: this.config.env.SMTP_USER, pass: this.config.env.SMTP_PASSWORD }
-            : undefined,
-      });
-      await transporter.sendMail({
-        from: this.config.env.SMTP_FROM,
-        to: email,
-        subject: 'Reset your Delayance password',
-        text: `Open this link to reset your password. It expires in 15 minutes.\n\n${link}`,
-      });
-    } catch {
-      /* intentionally identical response for all addresses and provider failures */
-    }
-  }
-  async resetPassword(input: { token: string; password: string }): Promise<void> {
-    const hash = createHash('sha256').update(input.token).digest('hex');
-    const adminToken = await this.adminToken();
-    const subject = await this.redis.client.getdel(`password-reset:${hash}`);
-    if (!subject) throw new BadRequestException('Invalid or expired reset link');
-    const response = await this.request(
-      `${this.adminUsersUrl}/${encodeURIComponent(subject)}/reset-password`,
-      {
-        method: 'PUT',
-        headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'password', value: input.password, temporary: false }),
-      },
-    );
-    if (!response.ok) throw new ServiceUnavailableException('Password reset unavailable');
-  }
-  async refresh(
-    refreshToken: string,
-  ): Promise<AuthSession & { refreshToken: string; refreshExpiresIn?: number }> {
-    const body = new URLSearchParams({
-      grant_type: 'refresh_token',
-      client_id: this.config.env.KEYCLOAK_CLIENT_ID,
-      client_secret: this.config.env.KEYCLOAK_CLIENT_SECRET,
-      refresh_token: refreshToken,
-    });
-    const response = await this.request(this.tokenUrl, {
-      method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body,
-    });
-    if (response.status === 400 || response.status === 401)
+  async refresh(refreshToken: string): Promise<AuthTokens> {
+    const id = refreshId(refreshToken);
+    if (!id) throw new UnauthorizedException('Invalid refresh session');
+    const session = await this.database.db.query.sessions.findFirst({ where: eq(sessions.id, id) });
+    if (
+      !session ||
+      session.revokedAt ||
+      session.expiresAt <= new Date() ||
+      !/^[a-f0-9]{64}$/.test(session.refreshTokenHash) ||
+      !timingSafeEqual(
+        Buffer.from(session.refreshTokenHash, 'hex'),
+        Buffer.from(digest(refreshToken), 'hex'),
+      )
+    )
       throw new UnauthorizedException('Invalid refresh session');
-    if (!response.ok) throw new ServiceUnavailableException('Identity provider unavailable');
-    let tokens: z.infer<typeof tokenResponse>;
-    try {
-      tokens = tokenResponse.parse(await response.json());
-    } catch {
-      throw new ServiceUnavailableException('Invalid identity provider response');
-    }
-    const claims = await this.verifyToken(tokens.access_token);
-    const user = await this.provision(claims);
+    const user = await this.me(session.userId);
+    const next = `${id}.${randomBytes(32).toString('base64url')}`;
+    const updated = await this.database.db
+      .update(sessions)
+      .set({ refreshTokenHash: digest(next) })
+      .where(
+        and(
+          eq(sessions.id, id),
+          eq(sessions.refreshTokenHash, digest(refreshToken)),
+          isNull(sessions.revokedAt),
+          gt(sessions.expiresAt, new Date()),
+        ),
+      )
+      .returning({ id: sessions.id });
+    if (!updated.length) throw new UnauthorizedException('Invalid refresh session');
     return {
-      accessToken: tokens.access_token,
-      refreshToken: tokens.refresh_token ?? refreshToken,
-      expiresIn: tokens.expires_in,
-      refreshExpiresIn: tokens.refresh_expires_in,
+      accessToken: await this.accessToken(user.id, id),
+      expiresIn: ACCESS_SECONDS,
+      refreshToken: next,
+      refreshExpiresIn: Math.max(0, Math.floor((session.expiresAt.getTime() - Date.now()) / 1000)),
       user,
     };
   }
   async logout(refreshToken?: string) {
-    if (!refreshToken) return { providerLogoutComplete: true };
-    const body = new URLSearchParams({
-      client_id: this.config.env.KEYCLOAK_CLIENT_ID,
-      client_secret: this.config.env.KEYCLOAK_CLIENT_SECRET,
-      refresh_token: refreshToken,
-    });
-    try {
-      const response = await this.request(`${this.issuer}/protocol/openid-connect/revoke`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/x-www-form-urlencoded' },
-        body,
-      });
-      return { providerLogoutComplete: response.ok };
-    } catch {
-      return { providerLogoutComplete: false };
-    }
+    const id = refreshToken ? refreshId(refreshToken) : null;
+    if (id && refreshToken)
+      await this.database.db
+        .update(sessions)
+        .set({ revokedAt: new Date() })
+        .where(
+          and(
+            eq(sessions.id, id),
+            eq(sessions.refreshTokenHash, digest(refreshToken)),
+            isNull(sessions.revokedAt),
+          ),
+        );
+    return { ok: true };
   }
-  async me(userId: string) {
+  async authenticateAccessToken(token: string) {
+    let claims: z.infer<typeof claimsSchema>;
+    try {
+      if (token.length > 8192) throw new Error('Invalid token size');
+      const { payload } = await jwtVerify(
+        token,
+        new TextEncoder().encode(this.config.env.AUTH_JWT_SECRET),
+        {
+          algorithms: ['HS256'],
+          issuer: 'delayance',
+          audience: 'delayance-api',
+          requiredClaims: ['exp', 'iat', 'sub', 'sid'],
+        },
+      );
+      claims = claimsSchema.parse(payload);
+    } catch {
+      throw new UnauthorizedException('Invalid access token');
+    }
+    const session = await this.database.db.query.sessions.findFirst({
+      where: and(
+        eq(sessions.id, claims.sid),
+        eq(sessions.userId, claims.sub),
+        isNull(sessions.revokedAt),
+        gt(sessions.expiresAt, new Date()),
+      ),
+    });
+    if (
+      !session ||
+      session.userId !== claims.sub ||
+      session.revokedAt ||
+      session.expiresAt <= new Date()
+    )
+      throw new UnauthorizedException('Session expired or revoked');
+    const user = await this.me(claims.sub);
+    return { userId: user.id, email: user.email, name: user.name };
+  }
+  async me(userId: string): Promise<AuthUser> {
     const user = await this.database.db.query.users.findFirst({ where: eq(users.id, userId) });
-    if (!user) throw new UnauthorizedException();
-    return { id: user.id, email: user.email, name: user.name };
+    if (!user) throw new UnauthorizedException('Account unavailable');
+    return publicUser(user);
   }
   async updateProfile(userId: string, input: { name?: string }) {
     const name = input.name?.trim();
@@ -304,114 +227,72 @@ export class AuthService {
       entityType: 'user',
       entityId: userId,
     });
-    return { id: user.id, email: user.email, name: user.name };
+    return publicUser(user);
   }
-  async authenticateAccessToken(token: string) {
-    const claims = await this.verifyToken(token);
-    const user = await this.database.db.query.users.findFirst({
-      where: eq(users.keycloakSubject, claims.sub),
-    });
-    if (!user) throw new UnauthorizedException('Identity is not provisioned');
-    return { userId: user.id, email: user.email, name: user.name };
-  }
-  private async provision(claims: Claims): Promise<AuthUser> {
-    if (!claims.sub || !claims.email)
-      throw new UnauthorizedException('Keycloak token has no usable identity');
-    const email = claims.email.toLowerCase();
-    const existing = await this.database.db.query.users.findFirst({
-      where: eq(users.keycloakSubject, claims.sub),
-    });
-    if (existing) {
-      if (existing.email !== email) {
-        const conflict = await this.database.db.query.users.findFirst({
-          where: eq(users.email, email),
-        });
-        if (conflict && conflict.id !== existing.id)
-          throw new ConflictException('Email belongs to another user');
-        await this.database.db
-          .update(users)
-          .set({ email, updatedAt: new Date() })
-          .where(eq(users.id, existing.id));
-      }
-      return { id: existing.id, email, name: existing.name };
-    }
-    const emailOwner = await this.database.db.query.users.findFirst({
-      where: eq(users.email, email),
-    });
-    if (emailOwner) throw new ConflictException('Email already belongs to a Delayance account');
+  async forgotPassword(email: string): Promise<void> {
     try {
-      const [created] = await this.database.db
-        .insert(users)
-        .values({
-          email,
-          name: claims.name?.trim() || claims.preferred_username || email,
-          keycloakSubject: claims.sub,
-          passwordHash: null,
-        })
-        .returning();
-      if (!created) throw new Error('User creation failed');
-      await this.database.db.insert(auditEvents).values({
-        actorId: created.id,
-        action: 'user.registered',
-        entityType: 'user',
-        entityId: created.id,
+      const user = await this.findUser(email);
+      if (!user || !this.config.env.SMTP_HOST || !this.config.env.SMTP_FROM) return;
+      const token = randomBytes(32).toString('base64url');
+      await this.redis.client.set(
+        `local-password-reset:${digest(token)}`,
+        user.id,
+        'EX',
+        900,
+        'NX',
+      );
+      const link = `${this.config.env.WEB_ORIGIN}/reset-password#token=${encodeURIComponent(token)}`;
+      const transporter = nodemailer.createTransport({
+        host: this.config.env.SMTP_HOST,
+        port: this.config.env.SMTP_PORT,
+        secure: this.config.env.SMTP_SECURE,
+        auth:
+          this.config.env.SMTP_USER && this.config.env.SMTP_PASSWORD
+            ? { user: this.config.env.SMTP_USER, pass: this.config.env.SMTP_PASSWORD }
+            : undefined,
       });
-      return { id: created.id, email: created.email, name: created.name };
-    } catch (error) {
-      if (String(error).includes('users_keycloak_subject')) {
-        const retry = await this.database.db.query.users.findFirst({
-          where: eq(users.keycloakSubject, claims.sub),
-        });
-        if (retry) return { id: retry.id, email: retry.email, name: retry.name };
-      }
-      throw error;
+      await transporter.sendMail({
+        from: this.config.env.SMTP_FROM,
+        to: user.email,
+        subject: 'Reset your Delayance password',
+        text: `Open this link to reset your password. It expires in 15 minutes.\n\n${link}`,
+      });
+    } catch {
+      /* Recovery returns the same response for unknown accounts and delivery failures. */
     }
   }
-  private async verifyToken(token: string): Promise<Claims> {
-    const [h, p, s] = token.split('.');
-    if (!h || !p || !s) throw new UnauthorizedException('Malformed access token');
-    const header = JSON.parse(Buffer.from(h, 'base64url').toString()) as {
-      alg?: string;
-      kid?: string;
-    };
-    const claims = JSON.parse(Buffer.from(p, 'base64url').toString()) as Claims;
-    if (
-      header.alg !== 'RS256' ||
-      !header.kid ||
-      claims.iss !== this.issuer ||
-      !claims.exp ||
-      claims.exp <= Math.floor(Date.now() / 1000)
-    )
-      throw new UnauthorizedException('Invalid access token');
-    const aud = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
-    if (!aud.includes(this.config.env.KEYCLOAK_CLIENT_ID))
-      throw new UnauthorizedException('Invalid access token audience');
-    const key = await this.getJwk(header.kid);
-    const data = Buffer.from(`${h}.${p}`);
-    const sig = Buffer.from(s, 'base64url');
-    if (
-      !key.n ||
-      !key.e ||
-      !verifySignature(
-        'RSA-SHA256',
-        data,
-        createPublicKey({ key: { kty: key.kty, n: key.n, e: key.e }, format: 'jwk' }),
-        sig,
-      )
-    )
-      throw new UnauthorizedException('Invalid access token signature');
-    return claims;
+  async resetPassword(input: { token: string; password: string }): Promise<void> {
+    const userId = await this.redis.client.getdel(`local-password-reset:${digest(input.token)}`);
+    if (!userId || !z.string().uuid().safeParse(userId).success)
+      throw new BadRequestException('Invalid or expired reset link');
+    await this.setPassword(userId, input.password);
   }
-  private async getJwk(kid: string): Promise<Jwk> {
-    if (!this.jwks || this.jwks.expiresAt < Date.now() || !this.jwks.keys[kid]) {
-      const data = await this.json<{ keys: Jwk[] }>(`${this.issuer}/protocol/openid-connect/certs`);
-      this.jwks = {
-        expiresAt: Date.now() + 300_000,
-        keys: Object.fromEntries(data.keys.filter((k) => k.kid).map((k) => [k.kid as string, k])),
-      };
-    }
-    const key = this.jwks.keys[kid];
-    if (!key) throw new UnauthorizedException('Unknown token signing key');
-    return key;
+  async setLocalDevelopmentPassword(email: string, password: string) {
+    if (this.config.env.NODE_ENV === 'production')
+      throw new BadRequestException('Use email recovery in production');
+    const user = await this.findUser(email);
+    if (!user) throw new BadRequestException('Account not found');
+    await this.setPassword(user.id, password);
+  }
+  private async setPassword(userId: string, password: string) {
+    const passwordHash = await hashPassword(password);
+    await this.database.db.transaction(async (tx) => {
+      const updated = await tx
+        .update(users)
+        .set({ passwordHash, updatedAt: new Date() })
+        .where(eq(users.id, userId))
+        .returning({ id: users.id });
+      if (!updated.length) throw new BadRequestException('Account not found');
+      await tx
+        .update(sessions)
+        .set({ revokedAt: new Date() })
+        .where(and(eq(sessions.userId, userId), isNull(sessions.revokedAt)));
+      await tx.insert(auditEvents).values({
+        actorId: userId,
+        action: 'user.password_changed',
+        entityType: 'user',
+        entityId: userId,
+      });
+    });
   }
 }

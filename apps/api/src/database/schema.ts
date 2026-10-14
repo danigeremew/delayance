@@ -9,7 +9,9 @@ import {
   integer,
   boolean,
   bigint,
+  uniqueIndex,
 } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 import type { Document, DocumentAnalysis, DocumentTemplate } from '@delayance/document-model';
 
 export const projectRoleEnum = pgEnum('project_role', [
@@ -46,15 +48,18 @@ export const documentAnalysisStatusEnum = pgEnum('document_analysis_status', [
 
 export const officeSessionPermissionEnum = pgEnum('office_session_permission', ['read', 'write']);
 
-export const users = pgTable('users', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  email: text('email').notNull().unique(),
-  name: text('name').notNull(),
-  passwordHash: text('password_hash'),
-  keycloakSubject: text('keycloak_subject').unique(),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
-});
+export const users = pgTable(
+  'users',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    email: text('email').notNull().unique(),
+    name: text('name').notNull(),
+    passwordHash: text('password_hash'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [uniqueIndex('users_email_lower_unique').on(sql`lower(${table.email})`)],
+);
 
 export const sessions = pgTable(
   'sessions',

@@ -120,13 +120,13 @@ function getCookie(req: Request, name: string) {
     .find((v) => v.startsWith(`${name}=`))
     ?.slice(name.length + 1);
 }
-function setRefreshCookie(res: Response, value: string, maxAgeSeconds?: number) {
+function setRefreshCookie(res: Response, value: string, maxAgeSeconds: number) {
   res.cookie('delayance_refresh', value, {
     httpOnly: true,
     sameSite: 'lax',
     secure: process.env.NODE_ENV === 'production',
     path: '/auth',
-    maxAge: Math.max(0, maxAgeSeconds ?? 604800) * 1000,
+    maxAge: Math.max(0, maxAgeSeconds) * 1000,
   });
 }
 function requireOrigin(req: Request) {
@@ -142,7 +142,7 @@ function sendSession(
     expiresIn: number;
     user: { id: string; email: string; name: string };
     refreshToken: string;
-    refreshExpiresIn?: number;
+    refreshExpiresIn: number;
   },
 ) {
   setRefreshCookie(res, session.refreshToken, session.refreshExpiresIn);

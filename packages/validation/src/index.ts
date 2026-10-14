@@ -95,13 +95,7 @@ export const envSchema = z.object({
   API_PORT: z.coerce.number().default(48722),
   DATABASE_URL: z.string().min(1),
   REDIS_URL: z.string().min(1),
-  KEYCLOAK_BASE_URL: z.string().url().default('http://localhost:58741'),
-  KEYCLOAK_ISSUER_URL: z.string().url().default('http://localhost:58741/realms/delayance'),
-  KEYCLOAK_REALM: z.string().default('delayance'),
-  KEYCLOAK_CLIENT_ID: z.string().default('delayance-api'),
-  KEYCLOAK_CLIENT_SECRET: z.string().default('dev-client-secret-change-me'),
-  KEYCLOAK_PROVISIONER_CLIENT_ID: z.string().default('delayance-provisioner'),
-  KEYCLOAK_PROVISIONER_CLIENT_SECRET: z.string().default('dev-provisioner-secret-change-me'),
+  AUTH_JWT_SECRET: z.string().min(32).default('dev-auth-secret-change-me-for-production'),
   SMTP_HOST: z.string().optional(),
   SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(587),
   SMTP_USER: z.string().optional(),
@@ -146,7 +140,13 @@ export const envSchema = z.object({
 export type AppEnv = z.infer<typeof envSchema>;
 
 export function parseEnv(env: Record<string, string | undefined> = process.env): AppEnv {
-  return envSchema.parse(env);
+  const parsed = envSchema.parse(env);
+  if (
+    parsed.NODE_ENV === 'production' &&
+    parsed.AUTH_JWT_SECRET === 'dev-auth-secret-change-me-for-production'
+  )
+    throw new Error('Set a private AUTH_JWT_SECRET in production');
+  return parsed;
 }
 
 export const updateProfileSchema = z.object({
@@ -161,7 +161,9 @@ const email = z
   .transform((value) => value.toLowerCase());
 const password = z.string().min(8).max(256);
 
-export const loginSchema = z.object({ email, password: z.string().min(1) });
+export const localPasswordSchema = z.object({ email, password }).strict();
+
+export const loginSchema = z.object({ email, password: z.string().min(1).max(256) });
 export const registerSchema = z
   .object({
     email,

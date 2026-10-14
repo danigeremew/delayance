@@ -49,17 +49,16 @@ Uses Playwright. Set `PLAYWRIGHT_API_URL` / `PLAYWRIGHT_BASE_URL` if ports diffe
 
 ## Services
 
-| Service                      | URL                         |
-| ---------------------------- | --------------------------- |
-| Web                          | http://localhost:48721      |
-| API                          | http://localhost:48722      |
-| API docs (Swagger)           | http://localhost:48722/docs |
-| Keycloak (local development) | http://localhost:58741      |
-| MinIO console                | http://localhost:59003      |
+| Service            | URL                         |
+| ------------------ | --------------------------- |
+| Web                | http://localhost:48721      |
+| API                | http://localhost:48722      |
+| API docs (Swagger) | http://localhost:48722/docs |
+| MinIO console      | http://localhost:59003      |
 
-Postgres is exposed on host port **58433**, Redis on **64380**, Keycloak on **58741**, and MinIO on **59002/59003** to avoid conflicts with local services. Keycloak is bound to localhost and uses its development-only `dev-file` database for now. The compose stack imports `infra/keycloak/delayance-realm.json` when the realm is first created; existing realms are skipped. Login, signup, and recovery forms are hosted by Delayance. The API checks passwords with Keycloak Direct Access Grants and uses a restricted service account for account creation and password resets. The access token stays in browser memory; the rotating refresh token is an HttpOnly cookie. Existing realms skip import; apply configuration changes through the Keycloak Admin API. Do not reset volumes to apply theme or client changes.
+Postgres is exposed on host port **58433**, Redis on **64380**, and MinIO on **59002/59003** to avoid conflicts with local services. Delayance hosts login, signup, and recovery pages and authenticates directly against local user records. Access tokens stay in browser memory; rotating refresh tokens are stored in an HttpOnly cookie. No Keycloak service or credentials are needed.
 
-`pnpm reset:dev` removes local PostgreSQL, Redis, MinIO, and Keycloak volumes, recreates the stack, and applies migrations. It requires typing `RESET` and must never be run against production data.
+`pnpm reset:dev` removes local PostgreSQL, Redis, and MinIO volumes, recreates the stack, and applies migrations. It requires typing `RESET` and must never be run against production data.
 
 ## Gemini AI
 
@@ -121,6 +120,18 @@ LibreOffice is optional for offline conversion checks and is **not** required on
 
 ## Authentication and recovery
 
-Set `KEYCLOAK_CLIENT_SECRET` and `KEYCLOAK_PROVISIONER_CLIENT_SECRET` to match the two clients in the `delayance` realm. The provisioner service account needs only the `realm-management` client roles `manage-users` and `view-users`. The built-in `keycloak` login theme is used for any direct Keycloak pages; Delayance hosts `/login`, `/register`, `/forgot-password`, and `/reset-password`. The API must never receive the bootstrap admin credentials.
+Set `AUTH_JWT_SECRET` to a private random signing key of at least 32 characters. The placeholder in `.env.example` is only for isolated development; production startup rejects it. For example, generate a key locally with `node -e "console.log(require('node:crypto').randomBytes(48).toString('hex'))"` and save it in `.env`. Never commit the real key.
 
-Reset links require `SMTP_HOST` and `SMTP_FROM`. `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, and `SMTP_PASSWORD` are optional. Without SMTP, recovery requests still return the generic response but no mail is delivered. Reset tokens expire after 15 minutes, are stored as hashes in Redis, and are consumed once.
+Registration stores a randomly salted scrypt password hash. Login returns a 15-minute access token backed by a database session. Sessions last 24 hours from sign-in. Their HttpOnly cookie survives browser restarts, and the web app restores login automatically. Refresh tokens rotate atomically without extending that 24-hour deadline; replayed tokens are rejected. Signing in after expiry reuses the existing account; signup is only needed once. Logout and password resets revoke sessions immediately, including outstanding access tokens. Existing project/document authorization is unchanged.
+
+Migration `0009_session_one_day` caps existing active sessions at 24 hours. Migration `0008_local_auth` preserves accounts, their UUIDs, project ownership and memberships. It revokes prior sessions and adds case-insensitive email uniqueness. Historical migrations and the unused legacy identity-subject column are retained; application code no longer reads or writes it. The checked-in migration journal allows fresh installations to apply the full forward migration sequence. The old Keycloak volume can be retained for archival purposes; do not reset project data to switch auth.
+
+Passwords cannot be recovered from accounts created only through Keycloak. For an existing development account, set a new local password privately in your terminal:
+
+```sh
+pnpm auth:password your-email@example.com
+```
+
+The command prompts without echo, asks for confirmation, preserves the user ID/projects and revokes old sessions. It refuses production mode. Do not pass passwords as command-line arguments or commit them. New users can simply use **Create account**.
+
+Reset links require `SMTP_HOST` and `SMTP_FROM`. `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, and `SMTP_PASSWORD` are optional. Without SMTP, recovery requests still return the generic response but no mail is delivered. Reset tokens expire after 15 minutes, are stored as hashes in Redis, and are consumed once. Old identity-provider reset tokens are not accepted by local auth.

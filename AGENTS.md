@@ -80,7 +80,7 @@ Services run via Docker Compose in `infra/`:
 
 - **PostgreSQL (+ pgvector, JSONB)**: Host port `58433` (DB: `delayance`)
 - **Redis**: Host port `64380` (BullMQ queues, rate limiting, WOPI locks)
-- **Keycloak**: Host port `58741` (localhost-only development identity provider)
+- **Local authentication**: Email/password login in the API; scrypt password hashes and revocable sessions in PostgreSQL, rotating HttpOnly refresh cookies.
 - **MinIO (S3-compatible)**: Host API port `59002`, Console port `59003` (Bucket: `delayance`)
 - **Collabora CODE (LibreOffice Online)**: Host port `9980` (WOPI client for Writer editing)
 

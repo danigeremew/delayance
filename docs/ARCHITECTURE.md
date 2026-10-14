@@ -33,7 +33,7 @@ Applications may run as separate processes but share one codebase with clear pac
 - **PostgreSQL** (+ JSONB, pgvector) — relational metadata, analysis, and workflow state
 - **Redis** — BullMQ queues, rate limiting
 - **MinIO** — S3-compatible object storage for files
-- **Keycloak** — identity authority; the API brokers password grants, verifies access tokens, and maps Keycloak subjects to local user UUIDs. A separate restricted service account creates users and resets passwords
+- **Local auth** — salted scrypt password hashes in PostgreSQL; 15-minute HS256 access tokens tied to revocable database sessions; opaque rotating refresh tokens in a persistent HttpOnly cookie with a fixed 24-hour session deadline. Accounts and sessions survive application restarts in PostgreSQL. No external identity service is required.
 
 Protected routes return HTTP 401 when a bearer token is missing so the web client can restore its session using the refresh cookie. The home dashboard waits for this session check before requesting projects.
 

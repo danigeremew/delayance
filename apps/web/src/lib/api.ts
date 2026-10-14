@@ -116,31 +116,10 @@ export async function updateProfileApi(data: { name?: string; email?: string }) 
     body: JSON.stringify({ name: data.name }),
   });
 }
-export function changePasswordApi(...args: unknown[]) {
-  void args;
-  return Promise.reject(new Error('Password management is handled by Keycloak'));
-}
-export function getSessionsApi(...args: unknown[]) {
-  void args;
-  return Promise.reject(new Error('Session management is handled by Keycloak'));
-}
-export function revokeSessionApi(...args: unknown[]) {
-  void args;
-  return Promise.reject(new Error('Session management is handled by Keycloak'));
-}
-export function revokeAllSessionsApi(...args: unknown[]) {
-  void args;
-  return Promise.reject(new Error('Session management is handled by Keycloak'));
-}
 export async function logoutApi() {
   try {
-    const result = (await fetch(`${API_URL}/auth/logout`, {
-      method: 'POST',
-      credentials: 'include',
-    }).then((r) => r.json())) as { logoutUrl?: string };
-    accessToken = null;
-    if (result.logoutUrl && typeof window !== 'undefined') window.location.assign(result.logoutUrl);
-  } catch {
+    await fetch(`${API_URL}/auth/logout`, { method: 'POST', credentials: 'include' });
+  } finally {
     accessToken = null;
   }
 }
