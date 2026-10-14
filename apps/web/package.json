@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@delayance/design-system": "workspace:*",
+    "@delayance/validation": "workspace:*",
     "@delayance/document-engine": "workspace:*",
     "@delayance/document-model": "workspace:*",
     "cmdk": "^1.1.1",

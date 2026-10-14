@@ -85,6 +85,12 @@ Apply a proposal explicitly after placing the cursor (Write) or selecting the or
 
 ## Tests
 
+### Wordcraft comparison branch
+
+On `experiment/wordcraft-editor`, build the pinned Wordcraft source with `pnpm wordcraft:build`, then select **Wordcraft (experimental)** in a document's **Document editor** selector. The first build requires Rust 1.95+, the WASM target, and wasm-bindgen-cli 0.2.129. Detailed preparation and build commands are in [the integration guide](../integrations/wordcraft/README.md). The source clone and compiled assets are local, ignored build inputs. Collabora remains selectable for comparison.
+
+`WORDCRAFT_BROWSER_URL` is the browser editor URL (default `http://localhost:48721/wordcraft/index.html`). `WORDCRAFT_WOPI_BASE_URL` must be browser-reachable (default `http://localhost:48722`); it differs from Collabora's Docker-facing `WOPI_BASE_URL`.
+
 ```bash
 pnpm --filter @delayance/document-engine test
 pnpm --filter @delayance/document-model test

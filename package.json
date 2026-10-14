@@ -11,7 +11,9 @@
     "test:e2e": "pnpm --filter @delayance/web test:e2e",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\"",
-    "reset:dev": "bash scripts/reset-dev.sh"
+    "reset:dev": "bash scripts/reset-dev.sh",
+    "wordcraft:prepare": "node scripts/wordcraft.mjs prepare",
+    "wordcraft:build": "node scripts/wordcraft.mjs build"
   },
   "devDependencies": {
     "prettier": "^3.5.3",

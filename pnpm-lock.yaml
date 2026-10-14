@@ -150,6 +150,9 @@ importers:
       '@delayance/document-model':
         specifier: workspace:*
         version: link:../../packages/document-model
+      '@delayance/validation':
+        specifier: workspace:*
+        version: link:../../packages/validation
       cmdk:
         specifier: ^1.1.1
         version: 1.1.1(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)

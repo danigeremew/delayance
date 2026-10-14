@@ -1,0 +1,104 @@
+diff --git a/apps/wordcraft-web/Cargo.toml b/apps/wordcraft-web/Cargo.toml
+index d9b44aa..bc588dd 100644
+--- a/apps/wordcraft-web/Cargo.toml
++++ b/apps/wordcraft-web/Cargo.toml
+@@ -29,4 +29,4 @@ rfd = { workspace = true }
+ wasm-bindgen = "0.2"
+ wasm-bindgen-futures = "0.4"
+ js-sys = "0.3"
+-web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlElement", "HtmlCanvasElement", "HtmlAnchorElement", "HtmlIFrameElement", "Blob", "BlobPropertyBag", "Url", "Location", "CssStyleDeclaration", "Event", "EventTarget", "BeforeUnloadEvent", "ClipboardEvent", "DataTransfer", "FileList", "File", "DomStringList", "IdbFactory", "IdbOpenDbRequest", "IdbRequest", "IdbDatabase", "IdbObjectStore", "IdbTransaction", "IdbTransactionMode", "MediaQueryList"] }
++web-sys = { version = "0.3", features = ["MessageEvent", "Window", "Document", "Element", "HtmlElement", "HtmlCanvasElement", "HtmlAnchorElement", "HtmlIFrameElement", "Blob", "BlobPropertyBag", "Url", "Location", "CssStyleDeclaration", "Event", "EventTarget", "BeforeUnloadEvent", "ClipboardEvent", "DataTransfer", "FileList", "File", "DomStringList", "IdbFactory", "IdbOpenDbRequest", "IdbRequest", "IdbDatabase", "IdbObjectStore", "IdbTransaction", "IdbTransactionMode", "MediaQueryList"] }
+diff --git a/apps/wordcraft-web/index.html b/apps/wordcraft-web/index.html
+index ca6ad46..736337d 100644
+--- a/apps/wordcraft-web/index.html
++++ b/apps/wordcraft-web/index.html
+@@ -5,7 +5,7 @@
+   <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+   <title>WordCraft</title>
+   <link data-trunk rel="icon" href="../../assets/app-icon/wordcraft.ico" />
+-  <link data-trunk rel="rust" data-bin="wordcraft-web" data-wasm-opt="z" data-weak-refs />
++  <link data-trunk rel="rust" data-bin="wordcraft-web" data-weak-refs />
+   <style>
+     html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #e6e6e6; }
+     #wordcraft_canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+diff --git a/apps/wordcraft-web/src/main.rs b/apps/wordcraft-web/src/main.rs
+index 2f4283d..51a53ea 100644
+--- a/apps/wordcraft-web/src/main.rs
++++ b/apps/wordcraft-web/src/main.rs
+@@ -13,10 +13,14 @@
+ mod web;
+ 
+ #[cfg(target_arch = "wasm32")]
+-fn main() {
++#[wasm_bindgen::prelude::wasm_bindgen(start)]
++pub fn delayance_start() {
+     web::start();
+ }
+ 
++#[cfg(target_arch = "wasm32")]
++fn main() {}
++
+ #[cfg(not(target_arch = "wasm32"))]
+ fn main() {
+     eprintln!("wordcraft-web only runs in the browser: build it with `trunk build --release` in apps/wordcraft-web");
+diff --git a/apps/wordcraft-web/src/web.rs b/apps/wordcraft-web/src/web.rs
+index f6ccc77..15c3ddb 100644
+--- a/apps/wordcraft-web/src/web.rs
++++ b/apps/wordcraft-web/src/web.rs
+@@ -12,6 +12,7 @@ const DOC_EXTS: &[&str] = &["docx", "docm", "dotx", "dotm", "doc", "dot", "odt",
+ const IMAGE_EXTS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "bmp", "wmf", "emf"];
+ const RECIPIENT_EXTS: &[&str] = &["csv", "tsv", "txt", "xlsx", "xlsm", "ods"];
+ mod font_store;
++mod delayance;
+ const CANVAS_ID: &str = "wordcraft_canvas";
+ const LOADING_ID: &str = "wordcraft_loading";
+ 
+@@ -58,13 +59,27 @@ pub fn start() {
+                     let doc = if sample { wordcraft_engine::sample::sample_document() } else { wordcraft_engine::blank_document(&region) };
+                     let mut session = Session::new(doc);
+                     session.system_region = region;
+-                    let mut app = WordApp::new(session, services(inbox.clone(), cc.egui_ctx.clone(), dirty, saves.clone()));
++                    let bridge = if query().contains("delayance") { Some(delayance::Bridge::install(cc.egui_ctx.clone()).map_err(std::io::Error::other)?) } else { None };
++                    let mut svc = services(inbox.clone(), cc.egui_ctx.clone(), dirty, saves.clone());
++                    if let Some(bridge) = &bridge {
++                        let downloads = bridge.downloads.clone();
++                        let fallback = svc.download.take();
++                        svc.download = Some(Box::new(move |name, bytes| {
++                            if !name.to_ascii_lowercase().ends_with(".docx") {
++                                return match &fallback { Some(download) => download(name, bytes), None => Err("Browser downloads unavailable".into()) };
++                            }
++                            if downloads.borrow().len() >= 1 { return Err("A save is already queued".into()); }
++                            downloads.borrow_mut().push((name.into(), bytes.to_vec()));
++                            Ok(())
++                        }));
++                    }
++                    let mut app = WordApp::new(session, svc);
+                     app.autosave = false;
+                     // No document to show: start on File › Home, as the desktop app does (#766).
+-                    if !sample {
++                    if !sample && bridge.is_none() {
+                         app.start_screen();
+                     }
+-                    Ok(Box::new(WebShell { app, inbox, saves }))
++                    Ok(Box::new(WebShell { app, inbox, saves, bridge }))
+                 }),
+             )
+             .await;
+@@ -85,6 +100,7 @@ fn query() -> String {
+ /// and feed them through the inbox.
+ struct WebShell {
+     app: WordApp,
++    bridge: Option<delayance::Bridge>,
+     inbox: Inbox,
+     saves: Rc<PickerSaves>,
+ }
+@@ -138,7 +154,9 @@ impl eframe::App for WebShell {
+             });
+         }
+         self.settle_picker_saves();
++        if let Some(bridge) = &mut self.bridge { bridge.before(&mut self.app); }
+         self.app.logic(ctx);
++        if let Some(bridge) = &mut self.bridge { bridge.after(&mut self.app, ctx); }
+     }
+ 
+     fn raw_input_hook(&mut self, _ctx: &egui::Context, raw: &mut egui::RawInput) {

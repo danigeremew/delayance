@@ -43,6 +43,8 @@ Protected routes return HTTP 401 when a bearer token is missing so the web clien
 
 Editable documents are DOCX files in isolated, content-addressed MinIO storage. Collabora/LibreOffice Writer owns editing and formatting; PostgreSQL keeps only metadata and Delayance's extracted analysis representation.
 
+The `experiment/wordcraft-editor` branch also offers a selectable Wordcraft Rust/WASM editor. Its host bridge uses the same authorized WOPI sessions, locks, immutable DOCX storage, version creation, analysis, and AI acceptance pipeline. Native range handles include Wordcraft's document revision and selection positions. The experiment adds no database document model and no direct provider writes. See [Wordcraft integration](../integrations/wordcraft/README.md) for the pinned source, build steps, and limitations.
+
 ### AI safety
 
 AI providers must never write document content directly to the database.

@@ -12,6 +12,7 @@ import { AiPanel } from '@/components/ai-panel';
 import { SidebarResizeHandle } from '@/components/sidebar-resize-handle';
 import { DocumentsList, LeftSidebarShell } from '@/components/left-sidebar';
 import { LibreOfficeEditor } from '@/components/libreoffice-editor';
+import { WordcraftEditor } from '@/components/wordcraft-editor';
 import { OfficeOutlinePanel } from '@/components/office-outline-panel';
 import { EditorMenubar } from '@/components/editor-menubar';
 import { LayoutPanel } from '@/components/layout-panel';
@@ -35,6 +36,24 @@ export default function WorkspacePage() {
   const [editor, setEditor] = useState<EditorAdapter | null>(null);
   const [saveState, setSaveState] = useState<EditorSaveState>('loading');
   const [error, setError] = useState<string | null>(null);
+  const [editorKind, setEditorKind] = useState<'collabora' | 'wordcraft'>('collabora');
+  const [switching, setSwitching] = useState(false);
+
+  const changeEditor = async (next: 'collabora' | 'wordcraft') => {
+    setSwitching(true);
+    try {
+      if (editor && editor.getSaveState() !== 'loading') await editor.save();
+      setError(null);
+      setSaveState('loading');
+      setEditorKind(next);
+    } catch (cause) {
+      setError(
+        cause instanceof Error ? cause.message : 'Save the document before changing editors.',
+      );
+    } finally {
+      setSwitching(false);
+    }
+  };
 
   const loadDocs = useCallback(async () => {
     setDocs(await apiFetch<{ id: string; title: string }[]>(`/projects/${projectId}/documents`));
@@ -84,10 +103,36 @@ export default function WorkspacePage() {
               <h1 className="dl-app-topbar-title">{title}</h1>
               <span className="dl-app-topbar-status">{saveState}</span>
             </div>
-            <EditorMenubar editor={editor} onDownload={download} />
+            {editorKind === 'collabora' ? (
+              <EditorMenubar editor={editor} onDownload={download} />
+            ) : (
+              <span className="text-xs text-[var(--dl-muted)]">Wordcraft · experimental</span>
+            )}
           </div>
           <div className="dl-app-topbar-actions">
-            <button type="button" className="dl-topbar-btn" onClick={() => void editor?.save()}>
+            <select
+              aria-label="Document editor"
+              className="dl-topbar-btn"
+              value={editorKind}
+              disabled={switching || saveState === 'saving'}
+              onChange={(event) =>
+                void changeEditor(event.target.value === 'wordcraft' ? 'wordcraft' : 'collabora')
+              }
+            >
+              <option value="collabora">Collabora</option>
+              <option value="wordcraft">Wordcraft (experimental)</option>
+            </select>
+            <button
+              type="button"
+              className="dl-topbar-btn"
+              onClick={() =>
+                void editor
+                  ?.save()
+                  .catch((cause) =>
+                    setError(cause instanceof Error ? cause.message : 'Could not save document.'),
+                  )
+              }
+            >
               Save
             </button>
             <button type="button" className="dl-topbar-btn" onClick={() => setLeftOpen(!leftOpen)}>
@@ -152,14 +197,28 @@ export default function WorkspacePage() {
                     type="button"
                     className="rounded border border-[var(--dl-border)] bg-[var(--dl-bg)] px-3 py-1.5 text-xs hover:bg-[color-mix(in_srgb,var(--dl-fg)_6%,transparent)]"
                     onClick={() =>
-                      void editor?.executeCommand({ type: 'uno', command: '.uno:InsertAnnotation' })
+                      void editor
+                        ?.executeCommand({ type: 'uno', command: '.uno:InsertAnnotation' })
+                        .catch((cause) =>
+                          setError(
+                            cause instanceof Error ? cause.message : 'Could not insert comment.',
+                          ),
+                        )
                     }
                   >
                     + Insert Comment at Selection
                   </button>
                 </div>
               ) : null}
-              {leftTab === 'layout' ? <LayoutPanel editor={editor} /> : null}
+              {leftTab === 'layout' ? (
+                editorKind === 'collabora' ? (
+                  <LayoutPanel editor={editor} />
+                ) : (
+                  <p className="dl-tools-empty">
+                    Use Wordcraft’s Layout ribbon for page and paragraph settings.
+                  </p>
+                )
+              ) : null}
               {leftTab === 'io' ? (
                 <button
                   type="button"
@@ -174,12 +233,22 @@ export default function WorkspacePage() {
           </aside>
         ) : null}
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          <LibreOfficeEditor
-            projectId={projectId}
-            documentId={documentId}
-            onAdapter={setAdapter}
-            onSaveState={setSaveState}
-          />
+          {editorKind === 'wordcraft' ? (
+            <WordcraftEditor
+              key={`${projectId}:${documentId}`}
+              projectId={projectId}
+              documentId={documentId}
+              onAdapter={setAdapter}
+              onSaveState={setSaveState}
+            />
+          ) : (
+            <LibreOfficeEditor
+              projectId={projectId}
+              documentId={documentId}
+              onAdapter={setAdapter}
+              onSaveState={setSaveState}
+            />
+          )}
         </main>
         {rightOpen ? (
           <aside

@@ -1,4 +1,6 @@
-import { Controller, Get, Header, Param, Post, Req, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Header, Param, Post, Req, Res, UseGuards } from '@nestjs/common';
+import { officeSessionRequestSchema } from '@delayance/validation';
+import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -19,12 +21,15 @@ export class OfficeController {
     @Param('projectId') projectId: string,
     @Param('documentId') documentId: string,
     @Req() req: { user: ProjectRequestUser },
+    @Body(new ZodValidationPipe(officeSessionRequestSchema))
+    body: { editor: 'collabora' | 'wordcraft' },
   ) {
     return this.office.createBrowserSession({
       projectId,
       documentId,
       userId: req.user.userId,
       role: req.user.projectRole!,
+      editor: body.editor,
     });
   }
 
@@ -42,7 +47,10 @@ export class OfficeController {
     @Res() response: Response,
   ) {
     const result = await this.office.download(projectId, documentId);
-    response.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    response.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    );
     response.setHeader('Content-Disposition', `attachment; filename="${result.filename}"`);
     response.send(result.file);
   }
@@ -80,9 +88,12 @@ export class WopiController {
       await this.session(documentId, req),
       Buffer.concat(chunks),
       req.header('x-wopi-lock'),
+      req.header('x-delayance-file-version'),
     );
     response.setHeader('X-WOPI-ItemVersion', String(result.version));
-    response.status(200).json({ LastModifiedTime: result.LastModifiedTime });
+    response
+      .status(200)
+      .json({ LastModifiedTime: result.LastModifiedTime, version: result.version });
   }
 
   @Post(':documentId')
@@ -100,11 +111,12 @@ export class WopiController {
       return response.status(200).send();
     }
     if (session.permission !== 'write') return response.status(403).send();
-    const result = operation === 'LOCK' || operation === 'REFRESH_LOCK'
-      ? await this.office.lock(documentId, lock)
-      : operation === 'UNLOCK'
-        ? await this.office.unlock(documentId, lock)
-        : null;
+    const result =
+      operation === 'LOCK' || operation === 'REFRESH_LOCK'
+        ? await this.office.lock(documentId, lock)
+        : operation === 'UNLOCK'
+          ? await this.office.unlock(documentId, lock)
+          : null;
     if (!result) return response.status(501).send();
     if (!result.ok) {
       response.setHeader('X-WOPI-Lock', result.lock ?? '');

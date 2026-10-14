@@ -53,6 +53,7 @@ export class LibreOfficeEditorAdapter implements EditorAdapter {
     private readonly officeOrigin: string,
     private readonly accessToken: string,
     private readonly onDocumentLoaded?: () => void,
+    private readonly editorName = 'LibreOffice',
   ) {}
 
   openDocument() {
@@ -62,7 +63,7 @@ export class LibreOfficeEditorAdapter implements EditorAdapter {
     this.send('Action_Focus');
   }
   async save(): Promise<void> {
-    if (this.state === 'loading') throw new Error('Wait for LibreOffice to load.');
+    if (this.state === 'loading') throw new Error(`Wait for ${this.editorName} to load.`);
     if (this.saveRequest) throw new Error('A save is already in progress.');
     // Exporting an unchanged DOCX can change its binary hash and invalidate a proposal.
     if (this.state === 'saved') return;
@@ -70,7 +71,9 @@ export class LibreOfficeEditorAdapter implements EditorAdapter {
       const timeout = window.setTimeout(() => {
         this.saveRequest = null;
         this.setState('error');
-        reject(new Error('LibreOffice did not confirm the save. Retry saving before using AI.'));
+        reject(
+          new Error(`${this.editorName} did not confirm the save. Retry saving before using AI.`),
+        );
       }, 30000);
       this.saveRequest = {
         resolve: () => {
@@ -192,7 +195,7 @@ export class LibreOfficeEditorAdapter implements EditorAdapter {
         request?.resolve();
       } else {
         this.setState('error');
-        request?.reject(new Error('LibreOffice could not save the document.'));
+        request?.reject(new Error(`${this.editorName} could not save the document.`));
       }
     }
     if (row.MessageId === 'Action_Copy_Resp') {

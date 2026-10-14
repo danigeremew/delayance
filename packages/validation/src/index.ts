@@ -1,5 +1,54 @@
 import { z } from 'zod';
 
+export const officeSessionRequestSchema = z
+  .object({ editor: z.enum(['collabora', 'wordcraft']).default('collabora') })
+  .strict();
+
+const editorUrlSchema = z
+  .string()
+  .url()
+  .refine((value) => ['http:', 'https:'].includes(new URL(value).protocol));
+export const officeBrowserSessionSchema = z.object({
+  actionUrl: editorUrlSchema,
+  wopiSource: editorUrlSchema,
+  accessToken: z.string().min(1).max(2000),
+  permission: z.enum(['read', 'write']),
+});
+export const wordcraftWopiInfoSchema = z.object({
+  Version: z.string().regex(/^\d+:[a-f0-9]{64}$/),
+});
+export const wordcraftSaveSchema = z.object({ version: z.number().int().nonnegative().safe() });
+export const wordcraftStatusSchema = z.object({
+  MessageId: z.literal('App_LoadingStatus'),
+  Values: z.object({ Status: z.enum(['Frame_Ready', 'Document_Loaded']) }),
+});
+
+export const wordcraftReplySchema = z.object({
+  MessageId: z.literal('Delayance_Reply'),
+  Values: z.object({
+    requestId: z.string().uuid(),
+    ok: z.boolean(),
+    result: z.unknown().optional(),
+    error: z.string().optional(),
+  }),
+});
+
+export const wordcraftSelectionSchema = z.object({
+  text: z.string().max(50000),
+  isCollapsed: z.boolean(),
+  handle: z.string().min(1).max(100),
+});
+
+export const wordcraftFileSchema = z.object({
+  MessageId: z.literal('Delayance_Docx'),
+  Values: z.object({
+    id: z.number().int().positive(),
+    bytes: z
+      .instanceof(Uint8Array)
+      .refine((bytes) => bytes.length > 0 && bytes.length <= 100 * 1024 * 1024),
+  }),
+});
+
 export const geminiModelSchema = z
   .string()
   .trim()
@@ -86,6 +135,8 @@ export const envSchema = z.object({
     .transform((value) => value !== 'false'),
   OFFICE_DISCOVERY_URL: z.string().url().default('http://localhost:9980/hosting/discovery'),
   OFFICE_BROWSER_URL: z.string().url().default('http://localhost:9980'),
+  WORDCRAFT_BROWSER_URL: z.string().url().default('http://localhost:48721/wordcraft/index.html'),
+  WORDCRAFT_WOPI_BASE_URL: z.string().url().default('http://localhost:48722'),
   WEB_ORIGIN: z.string().url().default('http://localhost:48721'),
   WOPI_BASE_URL: z.string().url().default('http://host.docker.internal:48722'),
   WOPI_TOKEN_TTL_SECONDS: z.coerce.number().int().min(60).max(86_400).default(28_800),

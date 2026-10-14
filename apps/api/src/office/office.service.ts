@@ -47,6 +47,7 @@ export class OfficeService {
     documentId: string;
     userId: string;
     role: ProjectRole;
+    editor?: 'collabora' | 'wordcraft';
   }) {
     if (!this.config.env.OFFICE_ENABLED) {
       throw new BadRequestException('LibreOffice integration is disabled');
@@ -72,9 +73,14 @@ export class OfficeService {
 
     const wopiSource = new URL(
       `/wopi/files/${document.id}`,
-      this.config.env.WOPI_BASE_URL,
+      input.editor === 'wordcraft'
+        ? this.config.env.WORDCRAFT_WOPI_BASE_URL
+        : this.config.env.WOPI_BASE_URL,
     ).toString();
-    const actionUrl = await this.resolveEditorActionUrl(permission);
+    const actionUrl =
+      input.editor === 'wordcraft'
+        ? this.config.env.WORDCRAFT_BROWSER_URL
+        : await this.resolveEditorActionUrl(permission);
     return {
       actionUrl,
       wopiSource,
@@ -189,13 +195,24 @@ export class OfficeService {
     return this.storage.getObjectBuffer(document.fileKey);
   }
 
-  async putFile(session: WopiSession, buffer: Buffer, lock: string | undefined) {
+  async putFile(
+    session: WopiSession,
+    buffer: Buffer,
+    lock: string | undefined,
+    expectedVersion?: string,
+  ) {
     if (session.permission !== 'write') throw new ForbiddenException('Read-only WOPI session');
     if (buffer.length === 0 || buffer.length > 100 * 1024 * 1024) {
       throw new BadRequestException('Invalid office file size');
     }
     await this.assertCompatibleLock(session.documentId, lock ?? '');
     const document = await this.requireDocument(session.projectId, session.documentId);
+    if (
+      expectedVersion !== undefined &&
+      expectedVersion !== `${document.currentVersion}:${document.fileHash}`
+    ) {
+      throw new ConflictException('The saved document changed. Reopen it before saving.');
+    }
     const fileHash = createHash('sha256').update(buffer).digest('hex');
     if (fileHash === document.fileHash) {
       return {
@@ -215,7 +232,7 @@ export class OfficeService {
     }
     const version = document.currentVersion + 1;
     await this.database.db.transaction(async (tx) => {
-      await tx
+      const updated = await tx
         .update(documents)
         .set({
           fileKey,
@@ -227,7 +244,12 @@ export class OfficeService {
           analysisError: null,
           updatedAt: new Date(),
         })
-        .where(eq(documents.id, document.id));
+        .where(
+          and(eq(documents.id, document.id), eq(documents.currentVersion, document.currentVersion)),
+        )
+        .returning({ id: documents.id });
+      if (updated.length !== 1)
+        throw new ConflictException('The saved document changed. Reopen it before saving.');
       // `snapshot` is retained only until the destructive clean-break migration removes it.
       await tx.insert(documentVersions).values({
         documentId: document.id,

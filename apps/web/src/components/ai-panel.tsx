@@ -518,7 +518,7 @@ export function AiPanel({
       }
 
       if (editor !== undefined) {
-        if (!editor) throw new Error('Wait for LibreOffice to load.');
+        if (!editor) throw new Error('Wait for the document editor to load.');
         await editor.save();
         // Stock Collabora does not expose opaque range handles. Capture the text,
         // then require the same text to be selected again at explicit acceptance.
@@ -705,12 +705,12 @@ export function AiPanel({
       const proposal = proposals.find((item) => item.id === id);
       const revision = officeRevision(proposal?.ops[0]);
       if (revision) {
-        if (!editor) throw new Error('Wait for LibreOffice to load.');
+        if (!editor) throw new Error('Wait for the document editor to load.');
         await editor.save();
         const selection = await editor.getSelection();
         if (revision.action === 'replace' && selection.text !== revision.originalText) {
           throw new Error(
-            'Select the original text shown in the preview in LibreOffice, then apply.',
+            'Select the original text shown in the preview in the document editor, then apply.',
           );
         }
         if (revision.action === 'insert' && !selection.isCollapsed) {
@@ -748,7 +748,7 @@ export function AiPanel({
       } else {
         if (editor !== undefined)
           throw new Error(
-            'This proposal cannot modify the LibreOffice document. Generate a new Edit or Write proposal.',
+            'This proposal cannot modify the office document. Generate a new Edit or Write proposal.',
           );
         await apiFetch(`/projects/${projectId}/ai/proposals/${id}/accept`, {
           method: 'POST',
@@ -1206,8 +1206,8 @@ export function AiPanel({
                     <pre className="whitespace-pre-wrap">{officeRevision(p.ops[0])!.text}</pre>
                     <p>
                       {officeRevision(p.ops[0])!.action === 'replace'
-                        ? 'Select the original text in LibreOffice, then apply.'
-                        : 'Place the cursor in LibreOffice where you want this text, then apply.'}
+                        ? 'Select the original text in the document editor, then apply.'
+                        : 'Place the cursor in the document editor where you want this text, then apply.'}
                     </p>
                   </div>
                 ) : null}

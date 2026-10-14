@@ -53,7 +53,7 @@ export class OfficeAiService {
       throw new ForbiddenException('Contributor role required');
     if (mode === 'edit' && !request.selectedText.trim())
       throw new BadRequestException(
-        'Select the text to edit in LibreOffice before sending the request.',
+        'Select the text to edit in the document editor before sending the request.',
       );
     const chat = request.chatId
       ? (await this.ai.listChats(projectId, documentId)).find((item) => item.id === request.chatId)
@@ -186,7 +186,7 @@ export class OfficeAiService {
     if (proposal.status !== 'pending' || proposal.ops.length !== 1)
       throw new BadRequestException('Proposal cannot be applied');
     const parsed = officeTextRevisionSchema.safeParse(proposal.ops[0]);
-    if (!parsed.success) throw new BadRequestException('This is not a LibreOffice text proposal');
+    if (!parsed.success) throw new BadRequestException('This is not an office text proposal');
     const revision = parsed.data;
     const session = await this.office.sessionForToken(proposal.documentId, accessToken);
     if (
