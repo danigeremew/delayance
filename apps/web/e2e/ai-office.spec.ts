@@ -166,15 +166,20 @@ test('saves a Gemini key, selects a current or custom model, and tests the saved
   await expect(
     page.getByText('Gemini is not configured. Configure a Gemini API key.', { exact: true }),
   ).toBeVisible();
-  await expect(page.getByLabel('Gemini API Key', { exact: true })).toHaveAttribute('type', 'text');
-  await expect(page.getByLabel('Gemini API Key', { exact: true })).toHaveCSS(
-    '-webkit-text-security',
-    'disc',
-  );
-  await page.getByLabel('Gemini API Key', { exact: true }).fill('synthetic-test-key');
+  const keyInput = page.getByLabel('Gemini API Key', { exact: true });
+  await expect(keyInput).toHaveAttribute('type', 'password');
+  await keyInput.fill('synthetic-test-key');
+  await page.getByRole('button', { name: 'Show API key', exact: true }).click();
+  await expect(keyInput).toHaveAttribute('type', 'text');
+  await expect(keyInput).toHaveValue('synthetic-test-key');
+  await page.getByRole('button', { name: 'Hide API key', exact: true }).click();
+  await expect(keyInput).toHaveAttribute('type', 'password');
   await page.getByLabel('Model', { exact: true }).selectOption('gemini-3.8-flash');
   await page.getByRole('button', { name: 'Save Settings', exact: true }).click();
   await expect(page.getByText('Gemini API key and settings saved successfully.')).toBeVisible();
+  await page.getByRole('button', { name: 'Show API key', exact: true }).click();
+  await expect(keyInput).toHaveAttribute('type', 'text');
+  await expect(keyInput).toHaveValue('synthetic-test-key');
   await page.getByRole('button', { name: 'Test saved connection' }).click();
   await expect(page.getByText('Gemini connection works with gemini-3.8-flash.')).toBeVisible();
   await page.getByLabel('Custom model ID').fill('gemini-future-text');

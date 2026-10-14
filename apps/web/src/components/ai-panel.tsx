@@ -288,6 +288,7 @@ export function AiPanel({
   const [sources, setSources] = useState<SourceRow[]>([]);
   const [menuOpen, setMenuOpen] = useState<'mode' | 'model' | null>(null);
   const [apiKeyInput, setApiKeyInput] = useState('');
+  const [apiKeyChanged, setApiKeyChanged] = useState(false);
   const [showApiKey, setShowApiKey] = useState(false);
   const [selectedModel, setSelectedModel] = useState<string>('gemini-3.8-flash');
   const [selectedPolicy, setSelectedPolicy] = useState<'any' | 'local_only'>('any');
@@ -443,7 +444,7 @@ export function AiPanel({
 
       if (opts?.clearApiKey) {
         payload.apiKey = null;
-      } else if (apiKeyInput.trim()) {
+      } else if (apiKeyChanged && apiKeyInput.trim()) {
         payload.apiKey = apiKeyInput.trim();
       }
 
@@ -462,7 +463,8 @@ export function AiPanel({
       setSettings(updated);
       setSelectedModel(updated.model || 'gemini-3.8-flash');
       setSelectedPolicy((updated.policy as 'any' | 'local_only') || 'any');
-      setApiKeyInput('');
+      if (opts?.clearApiKey) setApiKeyInput('');
+      setApiKeyChanged(false);
       setSettingsSuccess(
         opts?.clearApiKey
           ? 'Custom API key removed.'
@@ -994,25 +996,23 @@ export function AiPanel({
             <div className="dl-ai-settings-field">
               <label htmlFor="gemini-api-key">Gemini API Key</label>
               <span className="dl-field-hint">
-                Stored encrypted at rest and never returned in plaintext.
+                Show reveals the key entered here. Previously saved keys are not returned.
               </span>
               <div className="dl-ai-settings-input-row">
                 <input
                   id="gemini-api-key"
-                  type="text"
+                  type={showApiKey ? 'text' : 'password'}
                   name="gemini-api-token"
-                  style={
-                    { WebkitTextSecurity: showApiKey ? 'none' : 'disc' } as React.CSSProperties
-                  }
                   data-1p-ignore="true"
                   data-lpignore="true"
                   data-bwignore="true"
                   value={apiKeyInput}
-                  onChange={(e) => setApiKeyInput(e.target.value)}
+                  onChange={(e) => {
+                    setApiKeyInput(e.target.value);
+                    setApiKeyChanged(true);
+                  }}
                   placeholder={
-                    settings?.hasApiKey
-                      ? '•••••••••••••••• (leave blank to keep current)'
-                      : 'AIzaSy...'
+                    settings?.hasApiKey ? 'Key saved — leave blank to keep it' : 'AIzaSy...'
                   }
                   autoComplete="off"
                   spellCheck={false}
@@ -1021,6 +1021,9 @@ export function AiPanel({
                   type="button"
                   className="dl-ai-btn"
                   onClick={() => setShowApiKey((v) => !v)}
+                  aria-label={showApiKey ? 'Hide API key' : 'Show API key'}
+                  aria-pressed={showApiKey}
+                  aria-controls="gemini-api-key"
                   title={showApiKey ? 'Hide key' : 'Show key'}
                 >
                   {showApiKey ? 'Hide' : 'Show'}

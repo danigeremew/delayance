@@ -31,6 +31,17 @@ function setup() {
 }
 
 describe('LibreOffice editor bridge', () => {
+  it('keeps native office menus and editing tools visible after loading', async () => {
+    const { adapter, postMessage, reply } = setup();
+    adapter.ready();
+    reply('App_LoadingStatus', { Status: 'Document_Loaded' });
+    await vi.advanceTimersByTimeAsync(600);
+    const messages = postMessage.mock.calls.map(([payload]) => JSON.parse(payload).MessageId);
+    expect(messages).toContain('Show_Menubar');
+    expect(messages).toContain('Show_StatusBar');
+    expect(messages).not.toContain('Hide_Menubar');
+    expect(messages).not.toContain('Hide_Toolbar');
+  });
   it('reads selection with Action_Copy and validates message origin', async () => {
     const { adapter, postMessage, reply } = setup();
     const selection = adapter.getSelection();

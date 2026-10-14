@@ -48,8 +48,8 @@ describe('AiPanel component', () => {
     expect(html).toContain('for="gemini-api-key"');
     expect(html).toContain('Gemini API Key');
     expect(html).toContain('id="gemini-api-key"');
-    expect(html).not.toContain('type="password"');
-    expect(html).toContain('-webkit-text-security:disc');
+    expect(html).toContain('type="password"');
+    expect(html).toContain('aria-label="Show API key"');
 
     // Gemini Model dropdown with models
     expect(html).toContain('id="gemini-model-select"');

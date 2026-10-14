@@ -10,6 +10,7 @@ describe('buildOfficeLaunchUrl', () => {
 
     const parsed = new URL(result);
     expect(parsed.searchParams.get('ui_defaults')).toContain('UITheme=light;SavedUIState=false');
+    expect(parsed.searchParams.get('ui_defaults')).toContain('ShowMenubar=true;ShowToolbar=true');
     expect(parsed.searchParams.get('WOPISrc')).toBe(
       'http://host.docker.internal:48722/wopi/files/document-id',
     );

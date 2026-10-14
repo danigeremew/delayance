@@ -148,12 +148,12 @@ export class OfficeService {
       HideUserList: true,
       HideSideBar: true,
       HideSidebar: true,
-      HideStatusBar: true,
-      HideRuler: true,
+      HideStatusBar: false,
+      HideRuler: false,
       DisableSidebar: true,
       EnableInsertRemoteImage: true,
       UI_Defaults:
-        'UIMode=compact;ShowSidebar=false;TextSidebar=false;Sidebar=false;ShowProperties=false;ShowMenubar=false;ShowToolbar=false;ShowStatusbar=false;ShowRuler=false;TextMenubar=false;TextStatusbar=false;TextRuler=false;UITheme=light;SavedUIState=false;SaveAsMode=group',
+        'UIMode=compact;ShowSidebar=false;TextSidebar=false;ShowMenubar=true;ShowToolbar=true;ShowStatusbar=true;ShowRuler=true;TextMenubar=true;TextStatusbar=true;TextRuler=true;UITheme=light;SavedUIState=false;SaveAsMode=group',
     };
   }
 

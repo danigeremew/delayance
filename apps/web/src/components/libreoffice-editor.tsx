@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '@/lib/api';
-import { buildOfficeLaunchUrl } from '@/editor/office-launch';
+import { buildOfficeLaunchUrl, OFFICE_UI_DEFAULTS } from '@/editor/office-launch';
 import type {
   DocumentLocation,
   EditorAdapter,
@@ -145,10 +145,9 @@ export class LibreOfficeEditorAdapter implements EditorAdapter {
     this.send('Hide_Sidebar');
     this.send('Action_Hide_Sidebar');
     this.send('Action_HideSidebar');
-    this.send('Hide_Menubar');
-    this.send('Hide_Toolbar');
-    this.send('Hide_Statusbar');
-    this.send('Hide_Ruler');
+    this.send('Show_Menubar');
+    this.send('Show_StatusBar');
+    this.send('Show_Ruler');
     this.send('Send_UNO_Command', {
       Command: '.uno:InvertBackground',
       Args: { NewTheme: { type: 'string', value: 'Light' } },
@@ -170,7 +169,7 @@ export class LibreOfficeEditorAdapter implements EditorAdapter {
       if (status === 'Document_Loaded') {
         this.setState('saved');
         this.applyCleanUI();
-        // Give Collabora 350ms to finalize hiding DOM elements before revealing the canvas
+        // Allow Collabora to finish applying its UI preferences before revealing it.
         setTimeout(() => {
           this.applyCleanUI();
           this.onDocumentLoaded?.();
@@ -390,11 +389,7 @@ export function LibreOfficeEditor({
       <form ref={form} action={launchUrl} method="post" target={frameName} className="hidden">
         <input name="access_token" value={session.accessToken} readOnly />
         <input name="access_token_ttl" value={String(session.accessTokenTtl)} readOnly />
-        <input
-          name="ui_defaults"
-          value="UIMode=compact;ShowSidebar=false;TextSidebar=false;Sidebar=false;ShowProperties=false;ShowMenubar=false;ShowToolbar=false;ShowStatusbar=false;ShowRuler=false;TextMenubar=false;TextStatusbar=false;TextRuler=false;UITheme=light;SavedUIState=false;SaveAsMode=group"
-          readOnly
-        />
+        <input name="ui_defaults" value={OFFICE_UI_DEFAULTS} readOnly />
       </form>
       <iframe
         ref={frame}
