@@ -11,16 +11,16 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.826.0",
     "@delayance/document-model": "workspace:*",
     "@delayance/docx-engine": "workspace:*",
+    "@delayance/file-storage": "workspace:*",
     "@delayance/validation": "workspace:*",
     "bullmq": "^5.53.2",
     "dotenv": "^16.5.0",
     "drizzle-orm": "^0.44.2",
     "ioredis": "^5.6.1",
-    "pg": "^8.16.0",
     "pdf-parse": "^1.1.1",
+    "pg": "^8.16.0",
     "playwright": "^1.52.0"
   },
   "devDependencies": {

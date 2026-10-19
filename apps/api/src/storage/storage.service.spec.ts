@@ -1,99 +1,108 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { envSchema } from '@delayance/validation';
 import { StorageService } from './storage.service';
+import { StorageController } from './storage.controller';
+import { AppConfigService } from '../config/app-config.service';
+import { DatabaseService } from '../database/database.service';
 
-vi.mock('@aws-sdk/client-s3', () => {
-  return {
-    S3Client: vi.fn().mockImplementation(() => ({
-      send: vi.fn().mockImplementation(async (command: any) => {
-        if (command && typeof command === 'object' && 'Bucket' in command && 'Key' in command) {
-          return {
-            Body: {
-              transformToByteArray: async () => new Uint8Array([104, 101, 108, 108, 111]),
-            },
-          };
-        }
-        return {
-          Body: {
-            transformToByteArray: async () => new Uint8Array([104, 101, 108, 108, 111]),
-          },
-        };
-      }),
-    })),
-    CreateBucketCommand: vi.fn().mockImplementation((args) => args),
-    PutObjectCommand: vi.fn().mockImplementation((args) => args),
-    GetObjectCommand: vi.fn().mockImplementation((args) => args),
+let directory: string;
+let service: StorageService;
+const values = vi.fn();
+
+beforeEach(async () => {
+  directory = await mkdtemp(join(tmpdir(), 'delayance-api-storage-'));
+  const config: AppConfigService = {
+    env: envSchema.parse({
+      DATABASE_URL: 'postgresql://localhost/test',
+      REDIS_URL: 'redis://localhost',
+      SECRETS_ENCRYPTION_KEY: '0'.repeat(64),
+      STORAGE_DIR: directory,
+      API_PUBLIC_URL: 'http://localhost:48722',
+    }),
   };
+  values.mockReturnValue({ returning: async () => [{ id: 'obj-123' }] });
+  // Only the insert chain is exercised; no database service is started in this unit test.
+  const database = { db: { insert: () => ({ values }) } } as unknown as DatabaseService;
+  service = new StorageService(config, database);
+  await service.onModuleInit();
+});
+afterEach(async () => {
+  vi.useRealTimers();
+  await rm(directory, { recursive: true, force: true });
 });
 
-vi.mock('@aws-sdk/s3-request-presigner', () => {
-  return {
-    getSignedUrl: vi.fn().mockResolvedValue('https://storage.example.com/signed-url'),
-  };
-});
+async function store() {
+  await service.putObjectAtKey({
+    objectKey: 'exports/test.docx',
+    contentType: 'application/octet-stream',
+    body: Buffer.from('document'),
+  });
+}
+function query(url: string) {
+  const params = new URL(url).searchParams;
+  return [params.get('token')!, params.get('signature')!] as const;
+}
 
 describe('StorageService', () => {
-  let service: StorageService;
-  let mockConfig: any;
-  let mockDb: any;
-
-  beforeEach(() => {
-    mockConfig = {
-      env: {
-        MINIO_BUCKET: 'delayance-files',
-        MINIO_ENDPOINT: 'localhost',
-        MINIO_PORT: 9000,
-        MINIO_ACCESS_KEY: 'minio',
-        MINIO_SECRET_KEY: 'minio123',
-        MINIO_USE_SSL: false,
-      },
-    };
-
-    mockDb = {
-      db: {
-        insert: vi.fn().mockReturnValue({
-          values: vi.fn().mockReturnValue({
-            returning: vi.fn().mockResolvedValue([
-              {
-                id: 'obj-123',
-                bucket: 'delayance-files',
-                objectKey: 'imports/uuid-file.docx',
-                contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-                sizeBytes: 12,
-              },
-            ]),
-          }),
-        }),
-      },
-    };
-
-    service = new StorageService(mockConfig, mockDb);
+  it('writes uploads and retains their metadata', async () => {
+    expect(
+      await service.putObject({
+        keyPrefix: 'imports',
+        filename: '../test.docx',
+        contentType: 'application/octet-stream',
+        body: Buffer.from('upload'),
+        projectId: 'project',
+        userId: 'user',
+      }),
+    ).toEqual({ id: 'obj-123' });
+    const metadata = values.mock.calls[0]![0] as { objectKey: string };
+    expect(metadata.objectKey).toMatch(/^imports\/[^/]+$/);
+    expect(values).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bucket: 'local',
+        projectId: 'project',
+        createdBy: 'user',
+        sizeBytes: 6,
+      }),
+    );
+    expect((await service.getObjectBuffer(metadata.objectKey)).toString()).toBe('upload');
   });
 
-  it('should be defined', () => {
-    expect(service).toBeDefined();
-  });
-
-  it('putObject uploads file and stores metadata in DB', async () => {
-    const res = await service.putObject({
-      projectId: 'proj-1',
-      userId: 'user-1',
-      keyPrefix: 'imports',
-      filename: 'sample.docx',
-      contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      body: Buffer.from('test content'),
+  it('issues a signed link and serves the same bytes as an attachment', async () => {
+    await store();
+    const url = await service.getSignedDownloadUrl('exports/test.docx');
+    expect(url).toMatch(/^http:\/\/localhost:48722\/storage\/download\?/);
+    const response = await new StorageController(service).download(...query(url));
+    expect(response.getHeaders()).toMatchObject({
+      type: 'application/octet-stream',
+      length: 8,
+      disposition: expect.stringContaining('attachment;'),
     });
-
-    expect(res).toBeDefined();
-    expect(res.id).toBe('obj-123');
+    expect(response.getStream()).toBeDefined();
+    expect(await service.download(...query(url))).toEqual({
+      body: Buffer.from('document'),
+      filename: 'test.docx',
+    });
   });
 
-  it('getObjectBuffer retrieves object as Buffer', async () => {
-    const buf = await service.getObjectBuffer('imports/sample.docx');
-    expect(buf.toString()).toBe('hello');
+  it('rejects missing, malformed, modified, and expired download capabilities', async () => {
+    await store();
+    const [token, signature] = query(await service.getSignedDownloadUrl('exports/test.docx', 1));
+    await expect(service.download(token, '0'.repeat(64))).rejects.toMatchObject({ status: 403 });
+    await expect(service.download(token + 'x', signature)).rejects.toMatchObject({ status: 403 });
+    await expect(service.download('', '')).rejects.toMatchObject({ status: 403 });
+    await expect(service.download(token, 'malformed')).rejects.toMatchObject({ status: 403 });
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.now() + 2000);
+    await expect(service.download(token, signature)).rejects.toMatchObject({ status: 403 });
   });
 
-  it('getSignedDownloadUrl returns presigned download URL', async () => {
-    const url = await service.getSignedDownloadUrl('exports/doc.pdf', 3600);
-    expect(url).toBe('https://storage.example.com/signed-url');
+  it('returns 404 for a valid link to a missing file', async () => {
+    await expect(
+      service.download(...query(await service.getSignedDownloadUrl('missing'))),
+    ).rejects.toMatchObject({ status: 404 });
   });
 });

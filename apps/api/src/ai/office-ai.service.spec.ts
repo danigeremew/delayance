@@ -93,15 +93,15 @@ function setup() {
 }
 
 beforeEach(() =>
-  extract.mockResolvedValue({ fileHash: hash, plainText: 'Text from saved LibreOffice DOCX' }),
+  extract.mockResolvedValue({ fileHash: hash, plainText: 'Text from saved Wordcraft DOCX' }),
 );
 
-describe('LibreOffice AI', () => {
+describe('Wordcraft AI', () => {
   it('uses saved DOCX text and keeps Write pending without mutating document records', async () => {
     const fixture = setup();
     const result = await fixture.run('write');
     expect(fixture.completeStructured.mock.calls[0]?.[0][1].content).toContain(
-      'Text from saved LibreOffice DOCX',
+      'Text from saved Wordcraft DOCX',
     );
     expect(result).toMatchObject({
       applied: false,

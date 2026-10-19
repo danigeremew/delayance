@@ -4,7 +4,9 @@
 
 - Node.js 22+
 - pnpm 9+ (Corepack: `corepack enable`)
-- Docker and Docker Compose
+- Local PostgreSQL with pgvector installed for its major version
+- Docker and Docker Compose (Redis only)
+- Rust 1.95+, the WASM target, and wasm-bindgen-cli 0.2.129 for the Wordcraft editor
 
 If Docker Desktop’s socket is unavailable, use the system socket:
 
@@ -15,31 +17,30 @@ export DOCKER_HOST=unix:///var/run/docker.sock
 ## Quick start
 
 ```bash
-# 1. Start infrastructure
-cd infra
-docker compose up -d
+# 1. Start Redis (PostgreSQL runs as a local service)
+docker compose -f infra/docker-compose.yml up -d
 
 # 2. Install dependencies (from repo root)
-cd ..
 pnpm install
 
 # 3. Environment
 cp .env.example .env
 
-# 4. Run database migrations
+# 4. Prepare local PostgreSQL as described below, then run migrations
 pnpm --filter @delayance/api db:migrate
 
 # 5. (Optional) Install Playwright Chromium for PDF export + E2E
 pnpm --filter @delayance/worker exec playwright install chromium
 pnpm --filter @delayance/web exec playwright install chromium
 
-# 6. Start apps
+# 6. Build Wordcraft, then start apps
+pnpm wordcraft:build
 pnpm dev
 ```
 
 ## E2E
 
-With API (+ worker for DOCX export jobs) running against Compose:
+With API (+ worker for DOCX export jobs) running against local PostgreSQL and Redis:
 
 ```bash
 pnpm test:e2e
@@ -54,11 +55,38 @@ Uses Playwright. Set `PLAYWRIGHT_API_URL` / `PLAYWRIGHT_BASE_URL` if ports diffe
 | Web                | http://localhost:48721      |
 | API                | http://localhost:48722      |
 | API docs (Swagger) | http://localhost:48722/docs |
-| MinIO console      | http://localhost:59003      |
 
-Postgres is exposed on host port **58433**, Redis on **64380**, and MinIO on **59002/59003** to avoid conflicts with local services. Delayance hosts login, signup, and recovery pages and authenticates directly against local user records. Access tokens stay in browser memory; rotating refresh tokens are stored in an HttpOnly cookie. No Keycloak service or credentials are needed.
+PostgreSQL runs as a local service on **5432** by default. Set `DATABASE_URL` to your local database credentials. Redis remains in Compose on **64380**. Delayance hosts login, signup, and recovery pages and authenticates directly against local user records. Access tokens stay in browser memory; rotating refresh tokens are stored in an HttpOnly cookie. No Keycloak service or credentials are needed.
 
-`pnpm reset:dev` removes local PostgreSQL, Redis, and MinIO volumes, recreates the stack, and applies migrations. It requires typing `RESET` and must never be run against production data.
+`pnpm reset:dev` removes only the Redis volume, including queued jobs, WOPI locks and password reset tokens, restarts Redis, and applies migrations to the configured local PostgreSQL database. PostgreSQL data and files in `STORAGE_DIR` are preserved. It requires typing `RESET` and must never be run against production data.
+
+## Local PostgreSQL
+
+Install PostgreSQL and the pgvector extension matching its major version using your operating system's package manager. Start the native PostgreSQL service. On a Linux installation with a `postgres` administrator, create the development role/database once:
+
+```sh
+sudo -u postgres createuser --login --pwprompt delayance
+sudo -u postgres createdb --owner=delayance delayance
+sudo -u postgres psql --dbname=delayance --file=infra/postgres/init.sql
+```
+
+Use your chosen password in `DATABASE_URL` (`postgresql://delayance:YOUR_PASSWORD@localhost:5432/delayance`). URL-encode reserved characters in the password. If the role/database already exists, reuse it and run the extension setup against that database. The administrator enables `vector` and `pgcrypto`; the application role owns the database so migrations can create its schema. Then run `pnpm --filter @delayance/api db:migrate`.
+
+Existing Docker PostgreSQL data is not transferred automatically. Back it up and restore it into the local database before switching an existing installation. Preserve old containers and volumes until the restored accounts and projects have been verified. The reset script never drops local databases.
+
+## Redis
+
+Redis backs BullMQ import/export, analysis and source-processing jobs, WOPI editing locks, and one-time password reset tokens. It is required by both API and worker. Login sessions live in PostgreSQL; authentication rate limits currently use the API process's memory. Removing Redis requires replacing these queue, lock, and token operations.
+
+## Local file storage
+
+The API and worker create `storage/` at the repository root automatically. Set `STORAGE_DIR` in `.env` to another folder (relative to the repository root or an absolute path). Both processes must use the same directory and have read/write access. Files are private, ignored by Git, and persist across application restarts. Keep this folder outside any static web root. PostgreSQL stores metadata and file keys, not file bytes.
+
+Set `API_PUBLIC_URL` to the browser-reachable API origin for downloads (default: `http://localhost:48722`). Downloads use expiring, signed API links generated after project authorization. DOCX saves retain immutable content-addressed keys; writes are atomic and never overwrite a different existing file.
+
+Existing MinIO files are not migrated automatically. Before switching an existing installation, copy its objects into `STORAGE_DIR`, retaining their full object keys as relative paths. Existing database bucket values remain historical metadata and do not need a schema migration. Back up the folder together with PostgreSQL. The former MinIO container and volume may remain on an existing machine; preserve the volume until its files have been copied and verified.
+
+This folder backend is intended for local use. API and worker processes on different machines require a shared filesystem or a future storage adapter. `pnpm reset:dev` preserves the folder even when database records are reset.
 
 ## Gemini AI
 
@@ -70,25 +98,21 @@ Open the AI sidebar's settings gear to enter a project Gemini API key, select a 
 
 The model picker includes current text models such as `gemini-3.8-flash`, `gemini-3.5-flash-lite`, `gemini-3.1-pro-preview`, and `gemini-3.1-flash-lite`. The custom model field accepts future Gemini model IDs without a code change. Use exact text-generation IDs from [Google's model catalog](https://ai.google.dev/gemini-api/docs/models); image, TTS and Live models are not document-writing models. Model access depends on the API key's Google project. Provider failures explain key/access, model availability and quota issues without exposing provider response bodies.
 
-### AI and LibreOffice
+### AI and Wordcraft
 
-Compose pins Collabora CODE 26.04.4.2.1, which provides `Action_Copy` / `Action_Copy_Resp` selection access and `Action_Paste` text insertion. This image is shell-free and receives configuration through command arguments. Apply the editor update with `docker compose -f infra/docker-compose.yml up -d --no-deps collabora`, then reopen the workspace.
+Wordcraft is the sole browser document editor. Build it with `pnpm wordcraft:build` before opening a document. Its native ribbon owns formatting, pagination, comments, and DOCX import/export. Collabora discovery and its Docker service are no longer used.
 
-The sidebar saves pending editor changes and waits for `Action_Save_Resp` before generating a proposal. Already saved files are not exported again, preserving their version for acceptance. The API reads the DOCX and its hash/version from one immutable snapshot so an autosave during intent classification does not create a false conflict. It deterministically extracts context independent of background analysis and the legacy JSON content. Ask answers questions; Review returns critique without changing the file. Write previews new text for insertion at a cursor; Edit requires selecting text in LibreOffice and previews the original and replacement. Auto classifies the instruction and follows the same permissions and preview requirements.
+The sidebar saves pending editor changes before generating a proposal. Ask and Review do not change files. Edit and Write preview proposed text, then require explicit acceptance. Acceptance verifies project permissions, the WOPI session, and the saved file version. Wordcraft validates native selection handles and document revisions before applying text; WOPI saves retain locks, immutable DOCX versions, and completion verification. Providers never write document records or DOCX XML directly.
 
-The API key field uses native password masking and a Show/Hide button, and opts out of password-manager capture. Newly entered keys remain in component memory after saving so they can be revealed during that session; previously stored keys are never returned by the API. LibreOffice launches with a light theme and white document background, with native menus, formatting tools, ruler, and status bar visible. Delayance's sidebar remains the AI surface.
-
-Apply a proposal explicitly after placing the cursor (Write) or selecting the original text (Edit). The API verifies the current file hash/version, permissions and the user's writable WOPI session; the editor checks the selection again, pastes plain text, waits for `Doc_ModifiedStatus`, and saves through WOPI. Save verification retries briefly when the upload is still pending; it never repeats the paste. A proposal is marked accepted only after the saved file contains its text. Typing further changes before acceptance requires generating a new proposal. Legacy JSON operations cannot mutate office-backed documents. AI never writes DOCX XML or document records directly.
-
-`POST /projects/:id/ai-settings/test` tests the saved Gemini configuration. `POST /projects/:id/documents/:documentId/office/ai` generates an office proposal. `POST /projects/:id/ai/proposals/:proposalId/office-accept` authorizes editor execution, and `office-complete` verifies the WOPI save.
+`POST /projects/:id/documents/:documentId/office/session` defaults to Wordcraft and accepts only `editor: "wordcraft"`. Removed editor values are rejected. `OFFICE_ENABLED=false` disables document editing sessions. The existing `/office/ai`, `/office-accept`, and `/office-complete` endpoints remain in use.
 
 ## Tests
 
-### Wordcraft comparison branch
+### Wordcraft build
 
-On `experiment/wordcraft-editor`, build the pinned Wordcraft source with `pnpm wordcraft:build`, then select **Wordcraft (experimental)** in a document's **Document editor** selector. The first build requires Rust 1.95+, the WASM target, and wasm-bindgen-cli 0.2.129. Detailed preparation and build commands are in [the integration guide](../integrations/wordcraft/README.md). The source clone and compiled assets are local, ignored build inputs. Collabora remains selectable for comparison.
+Install Rust 1.95+, the `wasm32-unknown-unknown` target, and `wasm-bindgen-cli` 0.2.129, then run `pnpm wordcraft:build`. See [the integration guide](../integrations/wordcraft/README.md) for exact commands and the pinned source revision. The source checkout and compiled assets are ignored build inputs. Opening a document always uses Wordcraft.
 
-`WORDCRAFT_BROWSER_URL` is the browser editor URL (default `http://localhost:48721/wordcraft/index.html`). `WORDCRAFT_WOPI_BASE_URL` must be browser-reachable (default `http://localhost:48722`); it differs from Collabora's Docker-facing `WOPI_BASE_URL`.
+`WORDCRAFT_BROWSER_URL` is the browser editor URL (default `http://localhost:48721/wordcraft/index.html`). `WORDCRAFT_WOPI_BASE_URL` must be browser-reachable (default `http://localhost:48722`).
 
 ```bash
 pnpm --filter @delayance/document-engine test
@@ -116,7 +140,7 @@ See [`.env.example`](../.env.example) for the full list.
 
 See [ASSUMPTIONS.md](./ASSUMPTIONS.md), [LIMITATIONS.md](./LIMITATIONS.md), and [REMAINING_WORK.md](./REMAINING_WORK.md).
 
-LibreOffice is optional for offline conversion checks and is **not** required on the happy path (Playwright PDF + OOXML export).
+Wordcraft is an alpha editor; review DOCX fidelity on representative copies before relying on it.
 
 ## Authentication and recovery
 

@@ -22,7 +22,7 @@ export class OfficeController {
     @Param('documentId') documentId: string,
     @Req() req: { user: ProjectRequestUser },
     @Body(new ZodValidationPipe(officeSessionRequestSchema))
-    body: { editor: 'collabora' | 'wordcraft' },
+    body: { editor: 'wordcraft' },
   ) {
     return this.office.createBrowserSession({
       projectId,

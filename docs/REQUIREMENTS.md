@@ -1442,7 +1442,7 @@ The exported document must use the document template, not the application theme.
 
 - Redis
 
-- MinIO or another S3-compatible object storage service
+- Private local file storage shared by the API and worker (`STORAGE_DIR`)
 
 ### Collaboration
 
@@ -1533,7 +1533,7 @@ Store the main document structure as JSONB and store important metadata in norma
 
 Do not store large files directly in PostgreSQL.
 
-Use object storage for:
+Use the private local storage folder for:
 
 - Uploaded DOCX files
 

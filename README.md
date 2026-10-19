@@ -15,18 +15,20 @@ AI Document Workspace — structured documents with deterministic numbering/refe
 cd infra && docker compose up -d && cd ..
 cp .env.example .env
 pnpm install
+# Prepare local PostgreSQL + pgvector first (see docs/SETUP.md)
 pnpm --filter @delayance/api db:migrate
+pnpm wordcraft:build
 pnpm dev
 ```
 
 - Web: http://localhost:48721
 - API / Swagger: http://localhost:48722/docs
 
-Infrastructure (Docker Compose in `infra/`):
+Local services (Docker Compose in `infra/` runs only Redis):
 
-- Postgres: localhost:58433
+- PostgreSQL: localhost:5432 (native service)
 - Redis: localhost:64380
-- MinIO: localhost:59002 (API) / 59003 (console)
+- Files: repository `storage/` folder (`STORAGE_DIR`)
 
 ## Document engine tests
 

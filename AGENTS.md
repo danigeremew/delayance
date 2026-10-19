@@ -20,7 +20,7 @@ Do not implement an item listed as deferred unless the user explicitly brings it
 
 ### Applications (`apps/`)
 
-- **`apps/web`**: Next.js workspace UI with Collabora/LibreOffice Writer as the central editing surface.
+- **`apps/web`**: Next.js workspace UI with Wordcraft as the central editing surface.
 - **`apps/api`**: NestJS REST API and OpenAPI/Swagger docs (`http://localhost:48722/docs`).
 - **`apps/worker`**: BullMQ background worker for asynchronous jobs (e.g., DOCX extraction, export, embedding generation).
 - **`apps/collaboration`**: Placeholder for real-time document editing (Yjs / WebSockets).
@@ -42,8 +42,8 @@ Do not implement an item listed as deferred unless the user explicitly brings it
 
 ### A. Office File Source of Truth
 
-- **DOCX in isolated object storage**: Editable files are immutable, content-addressed DOCX objects in MinIO. PostgreSQL stores their metadata, version pointers, analysis, and workflow state; it never stores document binaries.
-- **LibreOffice owns editing**: Collabora/LibreOffice owns formatting, pagination, tables, comments, printing, keyboard shortcuts, and DOCX compatibility. Delayance owns AI and document intelligence.
+- **DOCX in private file storage**: Editable files are immutable, content-addressed DOCX files in the private `STORAGE_DIR` folder. PostgreSQL stores their metadata, version pointers, analysis, and workflow state; it never stores document binaries.
+- **Wordcraft owns editing**: Wordcraft owns formatting, pagination, tables, comments, printing, keyboard shortcuts, and DOCX compatibility. Delayance owns AI and document intelligence.
 
 ### B. Deterministic Engines (No AI Hallucination in Logic)
 
@@ -76,13 +76,13 @@ Do not implement an item listed as deferred unless the user explicitly brings it
 
 ## 3. Infrastructure & Services
 
-Services run via Docker Compose in `infra/`:
+Redis runs via Docker Compose in `infra/`; PostgreSQL and files are local:
 
-- **PostgreSQL (+ pgvector, JSONB)**: Host port `58433` (DB: `delayance`)
-- **Redis**: Host port `64380` (BullMQ queues, rate limiting, WOPI locks)
+- **PostgreSQL (+ pgvector, JSONB)**: Native service on port `5432` (DB: `delayance`)
+- **Redis**: Host port `64380` (BullMQ queues, WOPI locks, password reset tokens)
 - **Local authentication**: Email/password login in the API; scrypt password hashes and revocable sessions in PostgreSQL, rotating HttpOnly refresh cookies.
-- **MinIO (S3-compatible)**: Host API port `59002`, Console port `59003` (Bucket: `delayance`)
-- **Collabora CODE (LibreOffice Online)**: Host port `9980` (WOPI client for Writer editing)
+- **Local file storage**: `STORAGE_DIR` (default: repository `storage/`); shared by the API and worker
+- **Wordcraft**: Browser Rust/WASM editor built with `pnpm wordcraft:build`; no editor container
 
 ---
 
@@ -94,7 +94,9 @@ Services run via Docker Compose in `infra/`:
 cd infra && docker compose up -d && cd ..
 cp .env.example .env
 pnpm install
+# Prepare local PostgreSQL + pgvector per docs/SETUP.md
 pnpm --filter @delayance/api db:migrate
+pnpm wordcraft:build
 ```
 
 - Use the repository-pinned pnpm version (`pnpm@9.15.0`) through Corepack when possible.
@@ -143,7 +145,7 @@ pnpm test:e2e
 3. **Zod Validation**: Define input schemas in `packages/validation` or local Zod schemas for all external inputs and AI-generated outputs before consumption.
 4. **Error Handling**: Use domain-specific error classes for document operations and API error responses.
 5. **Dependency Direction**: Keep framework-independent domain logic in packages. API controllers, React components, workers, and provider adapters should orchestrate domain modules rather than duplicate their logic.
-6. **Database Access**: Keep persistence behind API services/repositories. Web clients and AI/provider code must not access PostgreSQL, Redis, or MinIO directly.
+6. **Database Access**: Keep persistence behind API services/repositories. Web clients and AI/provider code must not access PostgreSQL, Redis, or the private storage folder directly.
 7. **Public Contracts**: When changing a shared schema or exported type, update its package's public exports and every consumer in the same change. Maintain backward compatibility for stored analysis/version data or add an explicit migration/normalization path.
 8. **Git Hygiene**: Preserve unrelated user changes and avoid destructive Git operations. Do not commit generated artifacts or secrets.
 9. **Documentation**: Update relevant docs when commands, environment variables, architecture, public API behavior, or known limitations change.
@@ -169,7 +171,7 @@ Skills supplement this file; the architectural and safety constraints above rema
 
 Before handing off a code change:
 
-1. Confirm the implementation respects the DOCX/LibreOffice source-of-truth and AI op-gating boundaries.
+1. Confirm the implementation respects the DOCX/Wordcraft source-of-truth and AI op-gating boundaries.
 2. Review the diff for secrets, generated files, unrelated changes, and accidental API/schema breakage.
 3. Run focused tests during development and the required repository-wide checks before completion.
 4. Update tests, `.env.example`, migrations, and documentation when the change affects them.

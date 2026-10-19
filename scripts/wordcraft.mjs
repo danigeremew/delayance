@@ -86,9 +86,7 @@ try {
     for (const name of ['LICENSE-MIT', 'LICENSE-APACHE', 'NOTICE', 'ATTRIBUTION.md']) {
       copyFileSync(resolve(source, name), resolve(destination, name));
     }
-    console.log(
-      'Wordcraft is ready: choose Wordcraft (experimental) in the workspace editor selector.',
-    );
+    console.log('Wordcraft is ready: open a document in the workspace.');
   }
 } catch (error) {
   console.error(error instanceof Error ? error.message : 'Wordcraft setup failed');

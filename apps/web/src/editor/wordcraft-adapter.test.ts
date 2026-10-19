@@ -37,7 +37,7 @@ function setup() {
       origin,
     );
   };
-  return { adapter, postMessage, respond };
+  return { adapter, postMessage, respond, reply };
 }
 describe('Wordcraft native-range bridge', () => {
   it('ignores foreign origins and validates the native selection contract', async () => {
@@ -65,5 +65,52 @@ describe('Wordcraft native-range bridge', () => {
     const pending = adapter.getSelection();
     adapter.dispose();
     await expect(pending).rejects.toThrow('disposed');
+  });
+  it.each(['insertText', 'replaceSelection'] as const)(
+    'saves immediately after %s before native dirty notifications',
+    async (method) => {
+      const { adapter, respond, postMessage, reply } = setup();
+      const mutation = adapter[method]('native-range', 'Accepted text');
+      respond({});
+      await mutation;
+      expect(adapter.getSaveState()).toBe('dirty');
+      const saving = adapter.save();
+      expect(JSON.parse(postMessage.mock.lastCall![0]).MessageId).toBe('Action_Save');
+      reply({ MessageId: 'Action_Save_Resp', Values: { success: true } });
+      await saving;
+    },
+  );
+  it('preserves saved versions and waits for acknowledgement of dirty saves', async () => {
+    const { adapter, postMessage, reply } = setup();
+    await adapter.save();
+    expect(postMessage).not.toHaveBeenCalled();
+    reply({ MessageId: 'Doc_ModifiedStatus', Values: { Modified: true } });
+    const saving = adapter.save();
+    expect(adapter.getSaveState()).toBe('saving');
+    expect(JSON.parse(postMessage.mock.lastCall![0]).MessageId).toBe('Action_Save');
+    reply({ MessageId: 'Action_Save_Resp', Values: { success: true } });
+    await saving;
+    expect(adapter.getSaveState()).toBe('saved');
+  });
+  it('validates lifecycle messages and rejects failed or disposed saves', async () => {
+    const { adapter, reply } = setup();
+    reply({ MessageId: 'Doc_ModifiedStatus', Values: { Modified: 'forged' } });
+    expect(adapter.getSaveState()).toBe('saved');
+    reply({ MessageId: 'Doc_ModifiedStatus', Values: { Modified: true } });
+    const saving = adapter.save();
+    reply({ MessageId: 'Action_Save_Resp', Values: { success: false } });
+    await expect(saving).rejects.toThrow('could not save');
+    const pending = adapter.save();
+    adapter.dispose();
+    await expect(pending).rejects.toThrow('disposed');
+  });
+  it('reports save timeouts without leaving a pending save', async () => {
+    const { adapter, reply } = setup();
+    reply({ MessageId: 'Doc_ModifiedStatus', Values: { Modified: true } });
+    const saving = adapter.save();
+    const rejected = expect(saving).rejects.toThrow('did not confirm');
+    await vi.advanceTimersByTimeAsync(30000);
+    await rejected;
+    expect(adapter.getSaveState()).toBe('error');
   });
 });

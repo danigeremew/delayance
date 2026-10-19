@@ -184,7 +184,11 @@ export function WordcraftEditor({
       const status = wordcraftStatusSchema.safeParse(data);
       if (status.success && status.data.Values.Status === 'Frame_Ready') void load().catch(report);
       if (data.MessageId === 'Delayance_Error')
-        report(new Error('Wordcraft could not open this document. Try Collabora.'));
+        report(
+          new Error(
+            'Wordcraft could not open this document. Reopen it or download the saved DOCX.',
+          ),
+        );
     };
     window.addEventListener('message', handler);
     const refresh = window.setInterval(

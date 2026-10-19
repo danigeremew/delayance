@@ -520,7 +520,7 @@ export function AiPanel({
       if (editor !== undefined) {
         if (!editor) throw new Error('Wait for the document editor to load.');
         await editor.save();
-        // Stock Collabora does not expose opaque range handles. Capture the text,
+        // Capture the editor-owned selection and text for the proposal,
         // then require the same text to be selected again at explicit acceptance.
         const selection =
           mode === 'edit' || mode === 'auto' || opts?.preferredMode === 'edit'
@@ -727,7 +727,7 @@ export function AiPanel({
           await editor.replaceSelection(selection.handle, revision.text);
         else await editor.insertText(selection.handle, revision.text);
         await editor.save();
-        // Collabora acknowledges its save before the WOPI upload has always finished.
+        // Retry completion while the saved DOCX snapshot becomes available.
         // Retry verification, never the paste, while the immutable file version arrives.
         for (let attempt = 0; ; attempt++) {
           try {

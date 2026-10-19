@@ -2,15 +2,15 @@ import { config as loadEnv } from 'dotenv';
 import { resolve } from 'node:path';
 import { Worker } from 'bullmq';
 import { Pool } from 'pg';
-import {
-  CreateBucketCommand,
-  GetObjectCommand,
-  PutObjectCommand,
-  S3Client,
-} from '@aws-sdk/client-s3';
+import { LocalFileStorage, LOCAL_STORAGE_BUCKET, storageFilename } from '@delayance/file-storage';
 import { randomUUID } from 'node:crypto';
 import { parseEnv } from '@delayance/validation';
-import { exportDocx, extractDocumentAnalysis, importDocx, documentToPrintHtml } from '@delayance/docx-engine';
+import {
+  exportDocx,
+  extractDocumentAnalysis,
+  importDocx,
+  documentToPrintHtml,
+} from '@delayance/docx-engine';
 import type { Document } from '@delayance/document-model';
 
 loadEnv({ path: resolve(__dirname, '../../../.env') });
@@ -19,42 +19,9 @@ loadEnv();
 const env = parseEnv(process.env);
 const pool = new Pool({ connectionString: env.DATABASE_URL });
 
-const s3 = new S3Client({
-  region: 'us-east-1',
-  endpoint: `${env.MINIO_USE_SSL ? 'https' : 'http'}://${env.MINIO_ENDPOINT}:${env.MINIO_PORT}`,
-  forcePathStyle: true,
-  credentials: {
-    accessKeyId: env.MINIO_ACCESS_KEY,
-    secretAccessKey: env.MINIO_SECRET_KEY,
-  },
-});
-
-async function ensureBucket() {
-  try {
-    await s3.send(new CreateBucketCommand({ Bucket: env.MINIO_BUCKET }));
-  } catch {
-    // exists
-  }
-}
-
-async function getObject(key: string): Promise<Buffer> {
-  const res = await s3.send(
-    new GetObjectCommand({ Bucket: env.MINIO_BUCKET, Key: key }),
-  );
-  const bytes = await res.Body?.transformToByteArray();
-  return Buffer.from(bytes ?? []);
-}
-
-async function putObject(key: string, body: Buffer, contentType: string) {
-  await s3.send(
-    new PutObjectCommand({
-      Bucket: env.MINIO_BUCKET,
-      Key: key,
-      Body: body,
-      ContentType: contentType,
-    }),
-  );
-}
+const files = new LocalFileStorage(env.STORAGE_DIR, resolve(__dirname, '../../..'));
+const getObject = (key: string) => files.get(key);
+const putObject = (key: string, body: Buffer) => files.put(key, body);
 
 async function updateJob(
   jobId: string,
@@ -85,10 +52,7 @@ async function updateJob(
     values.push(patch.error);
   }
   values.push(jobId);
-  await pool.query(
-    `UPDATE background_jobs SET ${sets.join(', ')} WHERE id = $${i}`,
-    values,
-  );
+  await pool.query(`UPDATE background_jobs SET ${sets.join(', ')} WHERE id = $${i}`, values);
 }
 
 function hashEmbed(text: string, dims = 32): number[] {
@@ -119,10 +83,7 @@ async function renderPdf(html: string): Promise<Buffer> {
 const connection = { url: env.REDIS_URL };
 const workers: Worker[] = [];
 
-function makeWorker(
-  queue: string,
-  processor: (data: Record<string, unknown>) => Promise<unknown>,
-) {
+function makeWorker(queue: string, processor: (data: Record<string, unknown>) => Promise<unknown>) {
   const worker = new Worker(
     queue,
     async (job) => {
@@ -147,14 +108,12 @@ function makeWorker(
     { connection },
   );
   worker.on('ready', () => console.log(`[worker] listening on ${queue}`));
-  worker.on('failed', (job, err) =>
-    console.error(`[worker] ${queue} failed ${job?.id}`, err),
-  );
+  worker.on('failed', (job, err) => console.error(`[worker] ${queue} failed ${job?.id}`, err));
   workers.push(worker);
 }
 
 async function main() {
-  await ensureBucket();
+  await files.initialize();
 
   makeWorker('health.ping', async (data) => ({
     ok: true,
@@ -197,17 +156,13 @@ async function main() {
       includeTocField: true,
       includePageNumberFields: true,
     });
-    const objectKey = `exports/${randomUUID()}-${title}.docx`;
-    await putObject(
-      objectKey,
-      exported.buffer,
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    );
+    const objectKey = `exports/${randomUUID()}-${storageFilename(title)}.docx`;
+    await putObject(objectKey, exported.buffer);
     const stored = await pool.query(
       `INSERT INTO stored_objects (bucket, object_key, content_type, size_bytes)
        VALUES ($1, $2, $3, $4) RETURNING id`,
       [
-        env.MINIO_BUCKET,
+        LOCAL_STORAGE_BUCKET,
         objectKey,
         'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         exported.buffer.length,
@@ -232,12 +187,12 @@ async function main() {
     const isPdf = pdf.slice(0, 4).toString() === '%PDF';
     const ext = isPdf ? 'pdf' : 'html';
     const contentType = isPdf ? 'application/pdf' : 'text/html';
-    const objectKey = `exports/${randomUUID()}-${title}.${ext}`;
-    await putObject(objectKey, pdf, contentType);
+    const objectKey = `exports/${randomUUID()}-${storageFilename(title)}.${ext}`;
+    await putObject(objectKey, pdf);
     const stored = await pool.query(
       `INSERT INTO stored_objects (bucket, object_key, content_type, size_bytes)
        VALUES ($1, $2, $3, $4) RETURNING id`,
-      [env.MINIO_BUCKET, objectKey, contentType, pdf.length],
+      [LOCAL_STORAGE_BUCKET, objectKey, contentType, pdf.length],
     );
     const storedId = stored.rows[0]?.id as string;
     await pool.query(`UPDATE document_exports SET stored_object_id = $1 WHERE id = $2`, [
@@ -276,7 +231,13 @@ async function main() {
            search_text = $3,
            updated_at = NOW()
        WHERE id = $4 AND file_hash = $5 AND current_version = $2`,
-      [JSON.stringify(analysis), version, analysis.plainText.slice(0, 100000), documentId, fileHash],
+      [
+        JSON.stringify(analysis),
+        version,
+        analysis.plainText.slice(0, 100000),
+        documentId,
+        fileHash,
+      ],
     );
     return { documentId, fileHash, version, nodes: analysis.nodes.length };
   });
@@ -311,17 +272,11 @@ async function main() {
           `SELECT object_key, content_type FROM stored_objects WHERE id = $1`,
           [row.stored_object_id],
         );
-        const file = obj.rows[0] as
-          | { object_key: string; content_type: string }
-          | undefined;
+        const file = obj.rows[0] as { object_key: string; content_type: string } | undefined;
         if (file) {
           const buf = await getObject(file.object_key);
           const key = file.object_key.toLowerCase();
-          if (
-            file.content_type?.includes('text') ||
-            key.endsWith('.md') ||
-            key.endsWith('.txt')
-          ) {
+          if (file.content_type?.includes('text') || key.endsWith('.md') || key.endsWith('.txt')) {
             text = buf.toString('utf8');
           } else if (key.endsWith('.docx') || row.source_type === 'docx') {
             const { documentToPlainText } = await import('@delayance/docx-engine');

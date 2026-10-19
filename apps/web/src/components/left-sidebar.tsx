@@ -231,7 +231,7 @@ export function DocumentsList({
         },
       );
 
-      setImportStatus('Import complete! LibreOffice is ready.');
+      setImportStatus('Import complete! Wordcraft is ready.');
       if (onRefreshDocs) onRefreshDocs();
       if (doc.id) {
         router.push(`/projects/${projectId}/documents/${doc.id}`);

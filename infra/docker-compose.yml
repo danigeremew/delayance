@@ -1,22 +1,4 @@
 services:
-  postgres:
-    image: pgvector/pgvector:pg16
-    container_name: delayance-postgres
-    environment:
-      POSTGRES_USER: delayance
-      POSTGRES_PASSWORD: delayance
-      POSTGRES_DB: delayance
-    ports:
-      - '58433:5432'
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
-    healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U delayance -d delayance']
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
   redis:
     image: redis:7-alpine
     container_name: delayance-redis
@@ -30,63 +12,5 @@ services:
       timeout: 3s
       retries: 10
 
-  minio:
-    image: quay.io/minio/minio:latest
-    container_name: delayance-minio
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: delayance
-      MINIO_ROOT_PASSWORD: delayance-secret
-    ports:
-      - '59002:9000'
-      - '59003:9001'
-    volumes:
-      - minio_data:/data
-    healthcheck:
-      test: ['CMD', 'mc', 'ready', 'local']
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-
-  minio-init:
-    image: quay.io/minio/mc:latest
-    container_name: delayance-minio-init
-    depends_on:
-      minio:
-        condition: service_started
-    entrypoint: >
-      /bin/sh -c "
-      sleep 3;
-      mc alias set local http://minio:9000 delayance delayance-secret;
-      mc mb --ignore-existing local/delayance;
-      exit 0;
-      "
-
-  collabora:
-    # Tag + digest makes Collabora upgrades an explicit code review/change.
-    image: collabora/code:26.04.4.2.1@sha256:4e983196eb9878f339cc506c38c21f1cc3473bca3d6de883c5de08f9c0cc3a6c
-    container_name: delayance-collabora
-    # 26.04 is shell-free; pass configuration directly to coolwsd.
-    command:
-      - --o:ssl.enable=false
-      - --o:ssl.termination=false
-      - --o:home_mode.enable=true
-      - --o:allow_update_popup=false
-      - --o:fetch_update_check=0
-      - --o:experimental_features=false
-      - --o:storage.wopi.alias_groups[@mode]=groups
-      - --o:storage.wopi.alias_groups.group[0].host=http://host.docker.internal:48722
-      - --o:storage.wopi.alias_groups.group[0].host[@allow]=true
-    extra_hosts:
-      - 'host.docker.internal:host-gateway'
-    ports:
-      - '9980:9980'
-    cap_add:
-      - MKNOD
-    restart: unless-stopped
-
 volumes:
-  postgres_data:
   redis_data:
-  minio_data:

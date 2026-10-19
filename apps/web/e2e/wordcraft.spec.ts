@@ -37,12 +37,6 @@ async function fixture(page: Page) {
   let proposal: Record<string, unknown> | null = null;
   const hash = () => createHash('sha256').update(bytes).digest('hex');
   const web = new URL(test.info().project.use.baseURL ?? 'http://localhost:48721').origin;
-  await page.route('http://localhost:9980/mock-office**', (route) =>
-    route.fulfill({
-      contentType: 'text/html',
-      body: `<script>window.addEventListener('message',e=>{if(e.source!==parent||e.origin!==${JSON.stringify(web)})return;const m=JSON.parse(e.data);if(m.MessageId==='Host_PostmessageReady')parent.postMessage(JSON.stringify({MessageId:'App_LoadingStatus',Values:{Status:'Document_Loaded'}}),e.origin);});</script>`,
-    }),
-  );
   await page.route(`${API}/**`, async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -96,10 +90,7 @@ async function fixture(page: Page) {
     if (pathname.endsWith('/ai/proposals')) return json(proposal ? [proposal] : []);
     if (pathname.endsWith('/office/session')) {
       return json({
-        actionUrl:
-          request.postDataJSON()?.editor === 'wordcraft'
-            ? `${web}/wordcraft/index.html`
-            : 'http://localhost:9980/mock-office',
+        actionUrl: `${web}/wordcraft/index.html`,
         wopiSource: `${API}/wopi/files/${documentId}`,
         accessToken: 'wopi-token',
         permission: 'write',
@@ -204,22 +195,19 @@ async function command(page: Page, method: string, params: Record<string, unknow
 }
 
 test('provides an actionable fallback when the Wordcraft build is missing', async ({ page }) => {
-  await fixture(page);
   await page.route('**/wordcraft/index.html', (route) =>
     route.fulfill({ status: 404, body: 'Missing build' }),
   );
-  await page.getByLabel('Document editor').selectOption('wordcraft');
+  await fixture(page);
   await expect(page.getByRole('alert').filter({ hasText: 'Wordcraft is not built' })).toBeVisible();
-  await page.getByLabel('Document editor').selectOption('collabora');
-  await expect(page.locator('iframe[title="LibreOffice Writer"]')).toBeVisible();
+  await expect(page.getByLabel('Document editor')).toHaveCount(0);
 });
 
-test('real Wordcraft rejects stale ranges, preserves bold text in DOCX, saves through WOPI, and switches back', async ({
+test('real Wordcraft rejects stale ranges, preserves bold text in DOCX, saves through WOPI, and releases its lock on navigation', async ({
   page,
 }) => {
   test.skip(!built, 'Run pnpm wordcraft:build to exercise the real Rust/WASM editor.');
   const data = await fixture(page);
-  await page.getByLabel('Document editor').selectOption('wordcraft');
   await expect(page.getByText('Loading Wordcraft…', { exact: true })).toHaveCount(0, {
     timeout: 90000,
   });
@@ -250,15 +238,14 @@ test('real Wordcraft rejects stale ranges, preserves bold text in DOCX, saves th
   const xml = await saved.file('word/document.xml')?.async('string');
   expect(xml).toContain('Wordcraft replacement');
   expect(xml).toMatch(/<w:b(?:\s|\/|>)/);
-  await page.getByLabel('Document editor').selectOption('collabora');
-  await expect(page.locator('iframe[title="LibreOffice Writer"]')).toBeVisible();
+  await expect(page.getByLabel('Document editor')).toHaveCount(0);
+  await page.getByTitle('Back to projects').click();
   await expect.poll(data.lock).toBe(null);
 });
 
 test('real Wordcraft applies an AI rewrite only after preview and acceptance', async ({ page }) => {
   test.skip(!built, 'Run pnpm wordcraft:build to exercise the real Rust/WASM editor.');
   const data = await fixture(page);
-  await page.getByLabel('Document editor').selectOption('wordcraft');
   await expect(page.getByText('Loading Wordcraft…', { exact: true })).toHaveCount(0, {
     timeout: 90000,
   });

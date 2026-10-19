@@ -1558,7 +1558,7 @@ Example:
     
 - Redis
     
-- MinIO or another S3-compatible object storage service
+- Private local file storage shared by the API and worker (`STORAGE_DIR`)
     
 
 ### Collaboration

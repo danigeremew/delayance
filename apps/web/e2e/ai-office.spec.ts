@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
 const API = process.env.PLAYWRIGHT_API_URL ?? 'http://localhost:48722';
+const WEB = process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:48721';
 const projectId = '00000000-0000-4000-8000-000000000002';
 const documentId = '00000000-0000-4000-8000-000000000003';
 const chatId = '00000000-0000-4000-8000-000000000004';
@@ -22,24 +23,34 @@ async function setup(page: Page) {
     hasApiKey: false,
     hasCustomApiKey: false,
   };
-  await page.route('http://localhost:9980/mock-office**', (route) =>
+  await page.route('**/wordcraft/index.html*', (route) =>
     route.fulfill({
       contentType: 'text/html',
       body: `<textarea aria-label="Office document">Original text</textarea><script>
       const editor = document.querySelector('textarea');
-      const host = ${JSON.stringify(new URL(workspace, 'http://localhost:48721').origin)};
+      const host = ${JSON.stringify(new URL(WEB).origin)};
       const send = (MessageId, Values) => parent.postMessage(JSON.stringify({MessageId, Values}), host);
       window.addEventListener('message', event => {
         if (event.origin !== host || event.source !== parent) return;
-        const message = JSON.parse(event.data);
-        if (message.MessageId === 'Host_PostmessageReady') send('App_LoadingStatus', {Status:'Document_Loaded'});
-        if (message.MessageId === 'Action_Copy') send('Action_Copy_Resp', {content: editor.value.slice(editor.selectionStart, editor.selectionEnd)});
-        if (message.MessageId === 'Action_Paste') {
-          editor.setRangeText(message.Values.Data, editor.selectionStart, editor.selectionEnd, 'end');
-          send('Doc_ModifiedStatus', {Modified:true});
+        const message = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
+        if (message.MessageId === 'Delayance_LoadDocument') send('App_LoadingStatus', {Status:'Document_Loaded'});
+        if (message.MessageId === 'Delayance_Request') {
+          const {requestId, method, params} = message.Values;
+          let result = {};
+          if (method === 'selection') {
+            const text = editor.value.slice(editor.selectionStart, editor.selectionEnd);
+            result = {text, isCollapsed: !text, handle: 'native-range'};
+          }
+          if (method === 'replace' || method === 'insert') {
+            editor.setRangeText(params.text, editor.selectionStart, editor.selectionEnd, 'end');
+            send('Doc_ModifiedStatus', {Modified:true});
+          }
+          send('Delayance_Reply', {requestId, ok:true, result});
         }
-        if (message.MessageId === 'Action_Save') send('Action_Save_Resp', {success:true});
+        if (message.MessageId === 'Action_Save') parent.postMessage({MessageId:'Delayance_Docx', Values:{id:1, bytes:new Uint8Array([1,2,3])}},host);
+        if (message.MessageId === 'Delayance_SaveResult') send('Action_Save_Resp', {success:message.Values.success});
       });
+      send('App_LoadingStatus', {Status:'Frame_Ready'});
     </script>`,
     }),
   );
@@ -68,12 +79,17 @@ async function setup(page: Page) {
     }
     if (path.endsWith('/office/session'))
       return json({
-        actionUrl: 'http://localhost:9980/mock-office',
+        actionUrl: `${WEB}/wordcraft/index.html`,
         wopiSource: `${API}/wopi/files/${documentId}`,
         accessToken: 'test-wopi-session',
         accessTokenTtl: Date.now() + 600000,
         permission: 'write',
       });
+    if (path.startsWith('/wopi/files/')) {
+      if (method === 'POST') return json({ version: 2 });
+      if (path.endsWith('/contents')) return route.fulfill({ body: Buffer.from([1, 2, 3]) });
+      return json({ Version: `1:${'a'.repeat(64)}` });
+    }
     if (path.endsWith('/office/ai')) {
       const input = route.request().postDataJSON();
       requests.push(input);
@@ -139,12 +155,16 @@ async function setup(page: Page) {
     return json({});
   });
   await page.goto(workspace);
-  await expect(page.getByText('Loading document…', { exact: true })).toHaveCount(0);
+  await expect(
+    page
+      .frameLocator('iframe[title="Wordcraft"]')
+      .getByRole('textbox', { name: 'Office document' }),
+  ).toBeVisible();
   await expect(page.getByRole('button', { name: 'AI settings', exact: true })).toBeVisible();
   return {
     requests,
     office: page
-      .frameLocator('iframe[title="LibreOffice Writer"]')
+      .frameLocator('iframe[title="Wordcraft"]')
       .getByRole('textbox', { name: 'Office document' }),
   };
 }

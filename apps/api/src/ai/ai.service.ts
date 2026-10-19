@@ -379,7 +379,7 @@ export class AiService {
     this.assertModeAllowed(input.role, input.mode);
     const docRow = await this.documents.get(input.projectId, input.documentId);
     if (docRow.fileKey)
-      throw new BadRequestException('Use the LibreOffice AI endpoint for this document.');
+      throw new BadRequestException('Use the office AI endpoint for this document.');
     const content = asDocument(docRow.content);
     const chatId = await this.resolveChatId({
       projectId: input.projectId,
@@ -689,7 +689,7 @@ export class AiService {
 
       const docRow = await this.documents.get(input.projectId, input.documentId);
       if (docRow.fileKey)
-        throw new BadRequestException('Use the LibreOffice AI endpoint for this document.');
+        throw new BadRequestException('Use the office AI endpoint for this document.');
       const content = asDocument(docRow.content);
       const { adapter, model, provider, external } = await this.resolveProvider(input.projectId);
 
@@ -853,7 +853,7 @@ export class AiService {
 
     const docRow = await this.documents.get(input.projectId, proposal.documentId);
     if (docRow.fileKey)
-      throw new BadRequestException('Legacy operations cannot modify a LibreOffice document.');
+      throw new BadRequestException('Legacy operations cannot modify an office-backed document.');
     const content = asDocument(docRow.content);
 
     const validated = validateAiProposal(

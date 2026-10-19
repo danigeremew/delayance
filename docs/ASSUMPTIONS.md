@@ -4,6 +4,10 @@ Decisions across Phases 0–8 and explicitly deferred work. See also [REMAINING_
 
 ## Product decisions
 
+PostgreSQL runs locally with pgvector; Redis is the only Compose service. Wordcraft is the sole browser editor, built from the pinned Rust/WASM source.
+
+Files use a private local `STORAGE_DIR` folder shared by the API and worker. This replaces the original MinIO requirement for the current local setup. DOCX versions remain immutable and content-addressed.
+
 | Topic             | Choice                                                                                                           |
 | ----------------- | ---------------------------------------------------------------------------------------------------------------- |
 | Product name      | Delayance                                                                                                        |

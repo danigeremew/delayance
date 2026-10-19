@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 export const officeSessionRequestSchema = z
-  .object({ editor: z.enum(['collabora', 'wordcraft']).default('collabora') })
+  .object({ editor: z.literal('wordcraft').default('wordcraft') })
   .strict();
 
 const editorUrlSchema = z
@@ -21,6 +21,15 @@ export const wordcraftSaveSchema = z.object({ version: z.number().int().nonnegat
 export const wordcraftStatusSchema = z.object({
   MessageId: z.literal('App_LoadingStatus'),
   Values: z.object({ Status: z.enum(['Frame_Ready', 'Document_Loaded']) }),
+});
+
+export const wordcraftModifiedSchema = z.object({
+  MessageId: z.literal('Doc_ModifiedStatus'),
+  Values: z.object({ Modified: z.boolean() }),
+});
+export const wordcraftSaveResponseSchema = z.object({
+  MessageId: z.literal('Action_Save_Resp'),
+  Values: z.object({ success: z.boolean() }),
 });
 
 export const wordcraftReplySchema = z.object({
@@ -112,27 +121,17 @@ export const envSchema = z.object({
     .string()
     .length(64)
     .regex(/^[0-9a-fA-F]+$/, 'SECRETS_ENCRYPTION_KEY must be 64 hex characters'),
-  MINIO_ENDPOINT: z.string().default('localhost'),
-  MINIO_PORT: z.coerce.number().default(59002),
-  MINIO_ACCESS_KEY: z.string().min(1),
-  MINIO_SECRET_KEY: z.string().min(1),
-  MINIO_BUCKET: z.string().default('delayance'),
-  MINIO_USE_SSL: z
-    .string()
-    .optional()
-    .transform((v) => v === 'true'),
+  STORAGE_DIR: z.string().trim().min(1).default('storage'),
+  API_PUBLIC_URL: z.string().url().optional(),
   AUTH_RATE_LIMIT_TTL_MS: z.coerce.number().default(60_000),
   AUTH_RATE_LIMIT_MAX: z.coerce.number().default(20),
   OFFICE_ENABLED: z
     .string()
     .optional()
     .transform((value) => value !== 'false'),
-  OFFICE_DISCOVERY_URL: z.string().url().default('http://localhost:9980/hosting/discovery'),
-  OFFICE_BROWSER_URL: z.string().url().default('http://localhost:9980'),
   WORDCRAFT_BROWSER_URL: z.string().url().default('http://localhost:48721/wordcraft/index.html'),
   WORDCRAFT_WOPI_BASE_URL: z.string().url().default('http://localhost:48722'),
   WEB_ORIGIN: z.string().url().default('http://localhost:48721'),
-  WOPI_BASE_URL: z.string().url().default('http://host.docker.internal:48722'),
   WOPI_TOKEN_TTL_SECONDS: z.coerce.number().int().min(60).max(86_400).default(28_800),
   WOPI_LOCK_TTL_SECONDS: z.coerce.number().int().min(60).max(7_200).default(1_800),
 });

@@ -30,9 +30,9 @@ Applications may run as separate processes but share one codebase with clear pac
 
 ## Data plane
 
-- **PostgreSQL** (+ JSONB, pgvector) — relational metadata, analysis, and workflow state
-- **Redis** — BullMQ queues, rate limiting
-- **MinIO** — S3-compatible object storage for files
+- **Local PostgreSQL** (+ JSONB, pgvector) — relational metadata, analysis, and workflow state
+- **Redis** — BullMQ queues, WOPI editing locks, one-time password reset tokens
+- **Local filesystem** — private immutable files in `STORAGE_DIR`, shared by API and worker
 - **Local auth** — salted scrypt password hashes in PostgreSQL; 15-minute HS256 access tokens tied to revocable database sessions; opaque rotating refresh tokens in a persistent HttpOnly cookie with a fixed 24-hour session deadline. Accounts and sessions survive application restarts in PostgreSQL. No external identity service is required.
 
 Protected routes return HTTP 401 when a bearer token is missing so the web client can restore its session using the refresh cookie. The home dashboard waits for this session check before requesting projects.
@@ -41,9 +41,9 @@ Protected routes return HTTP 401 when a bearer token is missing so the web clien
 
 ### Canonical document model
 
-Editable documents are DOCX files in isolated, content-addressed MinIO storage. Collabora/LibreOffice Writer owns editing and formatting; PostgreSQL keeps only metadata and Delayance's extracted analysis representation.
+Editable documents are DOCX files in isolated, content-addressed local file storage. Wordcraft is the sole browser editor and owns editing, formatting, pagination and DOCX import/export; PostgreSQL keeps metadata and Delayance's extracted analysis representation.
 
-The `experiment/wordcraft-editor` branch also offers a selectable Wordcraft Rust/WASM editor. Its host bridge uses the same authorized WOPI sessions, locks, immutable DOCX storage, version creation, analysis, and AI acceptance pipeline. Native range handles include Wordcraft's document revision and selection positions. The experiment adds no database document model and no direct provider writes. See [Wordcraft integration](../integrations/wordcraft/README.md) for the pinned source, build steps, and limitations.
+Its host bridge uses authorized WOPI sessions, locks, immutable DOCX storage, version creation, analysis, and AI acceptance. Native range handles include the document revision and selection positions. No database document model or direct provider writes are added. See [Wordcraft integration](../integrations/wordcraft/README.md) for build steps and limitations. PostgreSQL runs as a local service; Compose starts only Redis.
 
 ### AI safety
 
@@ -51,7 +51,7 @@ AI providers must never write document content directly to the database.
 
 Pipeline: text proposal → revision/permission validation → preview → accept/reject → editor bridge → WOPI save/version history.
 
-The LibreOffice sidebar uses the office AI endpoint, which extracts context from the current immutable DOCX and stores validated `office-text` revisions in proposal metadata. Ask/Review generate answers without revisions; Edit/Write remain pending until explicit acceptance. Acceptance verifies a user-scoped writable WOPI session and the original file hash/version before Collabora executes a plain-text paste. Completion checks the newly saved DOCX before marking a proposal accepted. Legacy JSON operations are rejected for office-backed documents.
+The Wordcraft sidebar uses the office AI endpoint, which extracts context from the current immutable DOCX and stores validated `office-text` revisions in proposal metadata. Ask/Review generate answers without revisions; Edit/Write remain pending until explicit acceptance. Acceptance verifies a user-scoped writable WOPI session and the original file hash/version before Wordcraft applies the revision to its validated native selection. Completion checks the newly saved DOCX before marking a proposal accepted. Legacy JSON operations are rejected for office-backed documents.
 
 ### Deterministic document processing
 

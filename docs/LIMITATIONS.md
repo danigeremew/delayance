@@ -1,6 +1,8 @@
 # Known Limitations (v1)
 
-- The `experiment/wordcraft-editor` branch embeds an alpha Wordcraft build. DOCX fidelity and pagination require evaluation on representative copies. Its native ribbon supplies editing tools; unsupported Delayance host commands are rejected; non-DOCX native exports download locally. See [the integration guide](../integrations/wordcraft/README.md).
+- File storage uses a private local folder. API and worker must share that filesystem; existing MinIO objects require a manual copy preserving object keys. Back up file bytes separately from PostgreSQL.
+
+- The sole browser editor is an alpha Wordcraft build. DOCX fidelity and pagination require evaluation on representative copies. Its native ribbon supplies editing tools; unsupported Delayance host commands are rejected; non-DOCX native exports download locally. See [the integration guide](../integrations/wordcraft/README.md).
 
 - Authentication is local email/password login. External identity providers and SSO are not implemented. Accounts previously created through Keycloak need a local password reset; their user IDs and projects are preserved.
 - Password-recovery mail is unavailable until SMTP is configured.
@@ -16,6 +18,6 @@
 
 See [REMAINING_WORK.md](./REMAINING_WORK.md) for the full post-v1 list.
 
-- LibreOffice AI revisions insert or replace plain text at the current cursor/selection; they do not preserve complex formatting inside a rewritten selection. Select all in Writer to request a whole-document text rewrite. Ask and Review do not alter the document.
+- Wordcraft AI revisions insert or replace plain text at the validated cursor/selection; verify formatting fidelity for rewritten selections. Select all in Wordcraft to request a whole-document text rewrite. Ask and Review do not alter the document.
 - Office AI context includes at most the first 100,000 characters of saved document text and 1,200 characters per allowed project source. Unsaved changes must be saved before requesting AI.
-- Stock Collabora exposes text selection, not stable opaque range handles. Edit acceptance rechecks selected text; Write uses the cursor position chosen at acceptance. The pinned 26.04 build is required for selection access.
+- Wordcraft native selection handles include document revisions. Selection or document changes invalidate pending application and require capturing the selection again.

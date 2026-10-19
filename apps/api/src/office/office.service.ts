@@ -47,10 +47,10 @@ export class OfficeService {
     documentId: string;
     userId: string;
     role: ProjectRole;
-    editor?: 'collabora' | 'wordcraft';
+    editor?: 'wordcraft';
   }) {
     if (!this.config.env.OFFICE_ENABLED) {
-      throw new BadRequestException('LibreOffice integration is disabled');
+      throw new BadRequestException('Document editing is disabled');
     }
     const document = await this.requireDocument(input.projectId, input.documentId);
     await this.ensureOfficeFile(
@@ -73,14 +73,9 @@ export class OfficeService {
 
     const wopiSource = new URL(
       `/wopi/files/${document.id}`,
-      input.editor === 'wordcraft'
-        ? this.config.env.WORDCRAFT_WOPI_BASE_URL
-        : this.config.env.WOPI_BASE_URL,
+      this.config.env.WORDCRAFT_WOPI_BASE_URL,
     ).toString();
-    const actionUrl =
-      input.editor === 'wordcraft'
-        ? this.config.env.WORDCRAFT_BROWSER_URL
-        : await this.resolveEditorActionUrl(permission);
+    const actionUrl = this.config.env.WORDCRAFT_BROWSER_URL;
     return {
       actionUrl,
       wopiSource,
@@ -365,28 +360,6 @@ export class OfficeService {
   private async assertCompatibleLock(documentId: string, requestedLock: string) {
     const current = await this.getLock(documentId);
     if (current && current !== requestedLock) throw new ConflictException({ lock: current });
-  }
-
-  private async resolveEditorActionUrl(permission: 'read' | 'write') {
-    const response = await fetch(this.config.env.OFFICE_DISCOVERY_URL);
-    if (!response.ok) throw new BadRequestException('Collabora discovery is unavailable');
-    const xml = await response.text();
-    const actionName = permission === 'write' ? 'edit' : 'view';
-    const action = [...xml.matchAll(/<action\b[^>]*>/g)]
-      .map((match) => match[0])
-      .find((tag) => new RegExp(`name="${actionName}"`).test(tag) && /ext="docx"/.test(tag));
-    const fallback = [...xml.matchAll(/<action\b[^>]*>/g)]
-      .map((match) => match[0])
-      .find((tag) => new RegExp(`name="${actionName}"`).test(tag));
-    const source = /(?:urlsrc)="([^"]+)"/
-      .exec(action ?? fallback ?? '')?.[1]
-      ?.replace(/&amp;/g, '&');
-    if (!source) throw new BadRequestException('Collabora discovery has no Writer action');
-    const discovered = new URL(source);
-    const browserOrigin = new URL(this.config.env.OFFICE_BROWSER_URL).origin;
-    discovered.protocol = new URL(browserOrigin).protocol;
-    discovered.host = new URL(browserOrigin).host;
-    return discovered.toString();
   }
 
   private lockKey(documentId: string) {
