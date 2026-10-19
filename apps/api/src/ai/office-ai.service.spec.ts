@@ -100,6 +100,7 @@ describe('Wordcraft AI', () => {
   it('uses saved DOCX text and keeps Write pending without mutating document records', async () => {
     const fixture = setup();
     const result = await fixture.run('write');
+    expect(result.externalProviderWarning).toBeNull();
     expect(fixture.completeStructured.mock.calls[0]?.[0][1].content).toContain(
       'Text from saved Wordcraft DOCX',
     );

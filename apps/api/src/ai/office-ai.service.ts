@@ -169,7 +169,8 @@ export class OfficeAiService {
       resolvedMode: mode,
       applied: false,
       validation: { ok: true, errors: [] },
-      externalProviderWarning: 'Saved document text is sent to Gemini.',
+      // Normal provider context is disclosed in AI settings, not treated as a warning.
+      externalProviderWarning: null,
     };
   }
 

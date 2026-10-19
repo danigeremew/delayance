@@ -1,15 +1,19 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import {
   officeBrowserSessionSchema,
   wordcraftFileSchema,
   wordcraftWopiInfoSchema,
   wordcraftSaveSchema,
   wordcraftStatusSchema,
+  wordcraftHostLayoutSchema,
+  wordcraftLayoutSchema,
 } from '@delayance/validation';
 import { apiFetch } from '@/lib/api';
+import { EditorLockConflictError, releaseEditorLock } from '@/editor/editor-lock';
 import { WordcraftEditorAdapter } from '@/editor/wordcraft-adapter';
+import { editorRegions, type WordcraftLayout } from '@/editor/workspace-layout';
 import type { EditorAdapter, EditorSaveState } from '@/editor/adapter';
 
 interface Session {
@@ -24,21 +28,79 @@ export function WordcraftEditor({
   documentId,
   onAdapter,
   onSaveState,
+  leftWidth,
+  rightWidth,
+  onLayout,
+  onError,
+  onLockConflict,
 }: {
+  leftWidth: number;
+  rightWidth: number;
+  onLayout: (layout: WordcraftLayout | null) => void;
+  onError: (error: string | null) => void;
+  onLockConflict: (conflicted: boolean) => void;
   projectId: string;
   documentId: string;
   onAdapter: (adapter: EditorAdapter | null) => void;
   onSaveState: (state: EditorSaveState) => void;
 }) {
-  const frame = useRef<HTMLIFrameElement>(null);
   const [session, setSession] = useState<Session | null>(null);
+  const frame = useRef<HTMLIFrameElement>(null);
+  const documentLoaded = useRef(false);
+  const container = useRef<HTMLDivElement>(null);
+  const clipId = useId().replace(/:/g, '');
+  const [layout, setLayout] = useState<WordcraftLayout | null>(null);
+  const sendLayout = useCallback(() => {
+    if (!session || !frame.current) return;
+    const css = getComputedStyle(document.documentElement);
+    const color = (name: string) => css.getPropertyValue(name).trim();
+    const parsed = wordcraftHostLayoutSchema.safeParse({
+      left: leftWidth,
+      right: rightWidth,
+      theme: {
+        background: color('--dl-bg'),
+        panel: color('--dl-panel'),
+        text: color('--dl-fg'),
+        muted: color('--dl-muted'),
+        border: color('--dl-border'),
+        accent: color('--dl-accent'),
+      },
+    });
+    if (parsed.success)
+      frame.current.contentWindow?.postMessage(
+        JSON.stringify({ MessageId: 'Delayance_HostLayout', Values: parsed.data }),
+        new URL(session.actionUrl).origin,
+      );
+  }, [session, leftWidth, rightWidth]);
+  const sendLayoutRef = useRef(sendLayout);
+  sendLayoutRef.current = sendLayout;
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    sendLayout();
+    const observer = new ResizeObserver(sendLayout);
+    if (container.current) observer.observe(container.current);
+    const themeObserver = new MutationObserver(sendLayout);
+    themeObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['class', 'style'],
+    });
+    return () => {
+      observer.disconnect();
+      themeObserver.disconnect();
+    };
+  }, [sendLayout]);
 
   useEffect(() => {
     let active = true;
     setError(null);
     setLoaded(false);
+    documentLoaded.current = false;
+    onError(null);
+    onLockConflict(false);
+    setLayout(null);
+    onLayout(null);
     onSaveState('loading');
     void apiFetch<unknown>(`/projects/${projectId}/documents/${documentId}/office/session`, {
       method: 'POST',
@@ -53,7 +115,7 @@ export function WordcraftEditor({
     return () => {
       active = false;
     };
-  }, [projectId, documentId, onSaveState]);
+  }, [projectId, documentId, onSaveState, onLayout, onError, onLockConflict]);
 
   useEffect(() => {
     if (!session || !frame.current) return;
@@ -62,6 +124,8 @@ export function WordcraftEditor({
     let saving = false;
     let version = '';
     let hasLock = false;
+    let suspended = false;
+    let writable = session.permission === 'write';
     const abort = new AbortController();
     const lock = crypto.randomUUID();
     const origin = new URL(session.actionUrl).origin;
@@ -70,19 +134,31 @@ export function WordcraftEditor({
     const contentsUrl = new URL(wopiUrl);
     contentsUrl.pathname += '/contents';
     const report = (cause: unknown) => {
-      if (!active) return;
-      setError(cause instanceof Error ? cause.message : 'Wordcraft failed.');
+      if (!active || suspended) return;
+      const message = cause instanceof Error ? cause.message : 'Wordcraft failed.';
+      setError(message);
+      if (documentLoaded.current) onError(message);
       onSaveState('error');
     };
     const fetchWopi = async (url: URL, init: RequestInit = {}) => {
       const response = await fetch(url, { ...init, signal: init.signal ?? abort.signal });
+      if (response.status === 409) {
+        if (new Headers(init.headers).has('X-WOPI-Override'))
+          throw new EditorLockConflictError(
+            'Another editor currently holds this document’s editing lock. Close that editor and reopen this document.',
+          );
+        throw new Error('The saved document changed. Reopen this document before saving.');
+      }
       if (!response.ok)
         throw new Error(
-          response.status === 409
-            ? 'Another editor has this document open, or the saved version changed. Close the other editor and reopen this document.'
-            : `Wordcraft could not access the document (${response.status}). Reopen it to refresh the session.`,
+          `Wordcraft could not access the document (${response.status}). Reopen it to refresh the session.`,
         );
       return response;
+    };
+    const releaseLock = () => {
+      if (!hasLock) return;
+      hasLock = false;
+      releaseEditorLock(wopiUrl, lock);
     };
     const lockFile = async (operation: 'LOCK' | 'REFRESH_LOCK') => {
       await fetchWopi(wopiUrl, {
@@ -91,16 +167,16 @@ export function WordcraftEditor({
         headers: { 'X-WOPI-Override': operation, 'X-WOPI-Lock': lock },
       });
       hasLock = true;
-      if (!active) {
-        await fetch(wopiUrl, {
-          method: 'POST',
-          headers: { 'X-WOPI-Override': 'UNLOCK', 'X-WOPI-Lock': lock },
-        });
+      if (!active || suspended) {
+        releaseLock();
         throw new Error('Editor closed.');
       }
     };
     const adapter = new WordcraftEditorAdapter(frame.current, origin, session.accessToken, () => {
-      if (active) setLoaded(true);
+      if (active) {
+        documentLoaded.current = true;
+        setLoaded(true);
+      }
     });
     const unsubscribe = adapter.subscribe(onSaveState);
     onAdapter(adapter);
@@ -109,7 +185,15 @@ export function WordcraftEditor({
     const load = async () => {
       if (loading) return;
       loading = true;
-      if (session.permission === 'write') await lockFile('LOCK');
+      if (writable) {
+        try {
+          await lockFile('LOCK');
+        } catch (cause) {
+          if (!(cause instanceof EditorLockConflictError)) throw cause;
+          writable = false;
+          if (active) onLockConflict(true);
+        }
+      }
       const response = await fetchWopi(wopiUrl);
       const info = wordcraftWopiInfoSchema.parse(await response.json());
       version = info.Version;
@@ -118,12 +202,12 @@ export function WordcraftEditor({
       if (!bytes.length || bytes.length > 100 * 1024 * 1024) throw new Error('Invalid DOCX size.');
       if (active)
         frame.current?.contentWindow?.postMessage(
-          { MessageId: 'Delayance_LoadDocument', bytes, writable: session.permission === 'write' },
+          { MessageId: 'Delayance_LoadDocument', bytes, writable },
           origin,
         );
     };
     const save = async (id: number, bytes: Uint8Array) => {
-      if (saving || session.permission !== 'write') {
+      if (saving || !writable || suspended) {
         post('Delayance_SaveResult', { id, success: false });
         return;
       }
@@ -147,6 +231,7 @@ export function WordcraftEditor({
         version = `${result.version}:${Array.from(hash, (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
         if (active) {
           setError(null);
+          onError(null);
           post('Delayance_SaveResult', { id, success: true });
         }
       } catch (cause) {
@@ -181,8 +266,24 @@ export function WordcraftEditor({
         typeof data.Values !== 'object'
       )
         return;
+      const geometry = wordcraftLayoutSchema.safeParse(data);
+      if (geometry.success) {
+        setLayout(geometry.data.Values);
+        onLayout(geometry.data.Values);
+      }
       const status = wordcraftStatusSchema.safeParse(data);
-      if (status.success && status.data.Values.Status === 'Frame_Ready') void load().catch(report);
+      if (status.success && status.data.Values.Status === 'Frame_Ready') {
+        if (status.data.Values.embeddedLayout !== 1) {
+          report(
+            new Error(
+              'Wordcraft needs rebuilding for the integrated workspace. Run pnpm wordcraft:build, then reopen the document.',
+            ),
+          );
+          return;
+        }
+        sendLayoutRef.current();
+        void load().catch(report);
+      }
       if (data.MessageId === 'Delayance_Error')
         report(
           new Error(
@@ -190,10 +291,40 @@ export function WordcraftEditor({
           ),
         );
     };
+    const dismissPopups = (event: PointerEvent) => {
+      if (event.target !== frame.current) post('Delayance_DismissPopups', {});
+    };
+    const hide = () => {
+      suspended = true;
+      releaseLock();
+    };
+    const show = (event: PageTransitionEvent) => {
+      if (!event.persisted) return;
+      suspended = false;
+      if (!documentLoaded.current) {
+        loading = false;
+        setError(null);
+        post('Host_PostmessageReady', {});
+      } else if (writable) {
+        void (async () => {
+          await lockFile('LOCK');
+          const info = wordcraftWopiInfoSchema.parse(await (await fetchWopi(wopiUrl)).json());
+          if (info.Version !== version) {
+            releaseLock();
+            throw new Error(
+              'The saved document changed while you were away. Reopen this document before saving.',
+            );
+          }
+        })().catch(report);
+      }
+    };
+    window.addEventListener('pagehide', hide);
+    window.addEventListener('pageshow', show);
+    window.addEventListener('pointerdown', dismissPopups, true);
     window.addEventListener('message', handler);
     const refresh = window.setInterval(
       () => {
-        if (hasLock) void lockFile('REFRESH_LOCK').catch(report);
+        if (hasLock && !suspended) void lockFile('REFRESH_LOCK').catch(report);
       },
       5 * 60 * 1000,
     );
@@ -222,24 +353,41 @@ export function WordcraftEditor({
       window.clearInterval(refresh);
       window.clearTimeout(startup);
       window.removeEventListener('message', handler);
-      if (hasLock)
-        void fetch(wopiUrl, {
-          method: 'POST',
-          keepalive: true,
-          headers: { 'X-WOPI-Override': 'UNLOCK', 'X-WOPI-Lock': lock },
-        }).catch(() => {});
+      window.removeEventListener('pointerdown', dismissPopups, true);
+      window.removeEventListener('pagehide', hide);
+      window.removeEventListener('pageshow', show);
+      releaseLock();
       unsubscribe();
       adapter.dispose();
       onAdapter(null);
     };
-  }, [session, onAdapter, onSaveState]);
+  }, [session, onAdapter, onSaveState, onLayout, onError, onLockConflict]);
 
   return (
-    <div className="relative flex min-h-0 flex-1 flex-col">
-      {error ? (
+    <div ref={container} className="pointer-events-none absolute inset-0 z-20">
+      <svg width="0" height="0" aria-hidden="true" className="absolute">
+        <defs>
+          <clipPath id={clipId} clipPathUnits="objectBoundingBox">
+            {layout ? (
+              editorRegions(layout).map((rect, index) => (
+                <rect
+                  key={index}
+                  x={rect.x / layout.width}
+                  y={rect.y / layout.height}
+                  width={rect.width / layout.width}
+                  height={rect.height / layout.height}
+                />
+              ))
+            ) : (
+              <rect width="1" height="1" />
+            )}
+          </clipPath>
+        </defs>
+      </svg>
+      {error && !loaded ? (
         <div
           role="alert"
-          className="border-b border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800"
+          className="pointer-events-auto absolute inset-0 z-30 border-b border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800"
         >
           {error}
         </div>
@@ -247,7 +395,7 @@ export function WordcraftEditor({
       {!loaded && !error ? (
         <div
           role="status"
-          className="absolute inset-0 z-10 flex items-center justify-center bg-[var(--dl-bg)] text-sm text-[var(--dl-muted)]"
+          className="pointer-events-auto absolute inset-0 z-30 flex items-center justify-center bg-[var(--dl-bg)] text-sm text-[var(--dl-muted)]"
         >
           Loading Wordcraft…
         </div>
@@ -255,7 +403,8 @@ export function WordcraftEditor({
       <iframe
         ref={frame}
         title="Wordcraft"
-        className="min-h-0 w-full flex-1 border-0"
+        className="pointer-events-auto absolute inset-0 h-full w-full border-0"
+        style={{ clipPath: `url(#${clipId})`, visibility: error && !loaded ? 'hidden' : undefined }}
         allow="clipboard-read; clipboard-write"
       />
     </div>

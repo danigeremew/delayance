@@ -6,6 +6,10 @@ const root = resolve(import.meta.dirname, '..');
 const source = resolve(root, 'vendor/wordcraft');
 const revision = '04f6f53b8a4d8140c7bb62f949b0a6099a473da1';
 const patch = resolve(root, 'integrations/wordcraft/upstream.patch');
+const previousPatches = [
+  resolve(root, 'integrations/wordcraft/workspace-v1.patch'),
+  resolve(root, 'integrations/wordcraft/legacy.patch'),
+];
 function run(command, args, cwd = root, options = {}) {
   const result = spawnSync(command, args, { cwd, stdio: 'inherit', ...options });
   if (result.error) throw result.error;
@@ -30,11 +34,31 @@ function prepare() {
   const alreadyApplied =
     spawnSync('git', ['apply', '--reverse', '--check', patch], { cwd: source, stdio: 'ignore' })
       .status === 0;
-  if (!alreadyApplied) run('git', ['apply', '--check', patch], source);
-  if (!alreadyApplied) run('git', ['apply', patch], source);
+  if (!alreadyApplied) {
+    const previousPatch = previousPatches.find(
+      (candidate) =>
+        spawnSync('git', ['apply', '--reverse', '--check', candidate], {
+          cwd: source,
+          stdio: 'ignore',
+        }).status === 0,
+    );
+    if (previousPatch) run('git', ['apply', '--reverse', previousPatch], source);
+    try {
+      run('git', ['apply', '--check', patch], source);
+      run('git', ['apply', patch], source);
+    } catch (error) {
+      // Restore only our known previous patch; never reset or discard checkout changes.
+      if (previousPatch) run('git', ['apply', previousPatch], source);
+      throw error;
+    }
+  }
   copyFileSync(
     resolve(root, 'integrations/wordcraft/delayance.rs'),
     resolve(source, 'apps/wordcraft-web/src/web/delayance.rs'),
+  );
+  copyFileSync(
+    resolve(root, 'integrations/wordcraft/embedded.rs'),
+    resolve(source, 'crates/ui-egui/src/embedded.rs'),
   );
   console.log(`Wordcraft ${revision} prepared at ${source}`);
 }

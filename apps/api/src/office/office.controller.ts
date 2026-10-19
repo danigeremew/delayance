@@ -1,5 +1,16 @@
-import { Body, Controller, Get, Header, Param, Post, Req, Res, UseGuards } from '@nestjs/common';
-import { officeSessionRequestSchema } from '@delayance/validation';
+import {
+  Body,
+  Controller,
+  ForbiddenException,
+  Get,
+  Header,
+  Param,
+  Post,
+  Req,
+  Res,
+  UseGuards,
+} from '@nestjs/common';
+import { officeReleaseLockSchema, officeSessionRequestSchema } from '@delayance/validation';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
@@ -59,6 +70,19 @@ export class OfficeController {
 @Controller('wopi/files')
 export class WopiController {
   constructor(private readonly office: OfficeService) {}
+
+  /** Simple form POST allows page-exit beacons without a CORS preflight. */
+  @Post(':documentId/release')
+  async releaseLock(
+    @Param('documentId') documentId: string,
+    @Req() req: Request,
+    @Body(new ZodValidationPipe(officeReleaseLockSchema)) body: { lock: string },
+  ) {
+    const session = await this.session(documentId, req);
+    if (session.permission !== 'write') throw new ForbiddenException('Read-only editor');
+    const result = await this.office.unlock(documentId, body.lock);
+    return { released: result.ok };
+  }
 
   @Get(':documentId')
   async checkFileInfo(@Param('documentId') documentId: string, @Req() req: Request) {

@@ -27,14 +27,14 @@ index 2f4283d..51a53ea 100644
 +++ b/apps/wordcraft-web/src/main.rs
 @@ -13,10 +13,14 @@
  mod web;
- 
+
  #[cfg(target_arch = "wasm32")]
 -fn main() {
 +#[wasm_bindgen::prelude::wasm_bindgen(start)]
 +pub fn delayance_start() {
      web::start();
  }
- 
+
 +#[cfg(target_arch = "wasm32")]
 +fn main() {}
 +
@@ -42,38 +42,50 @@ index 2f4283d..51a53ea 100644
  fn main() {
      eprintln!("wordcraft-web only runs in the browser: build it with `trunk build --release` in apps/wordcraft-web");
 diff --git a/apps/wordcraft-web/src/web.rs b/apps/wordcraft-web/src/web.rs
-index f6ccc77..15c3ddb 100644
+index f6ccc77..2026e37 100644
 --- a/apps/wordcraft-web/src/web.rs
 +++ b/apps/wordcraft-web/src/web.rs
-@@ -12,6 +12,7 @@ const DOC_EXTS: &[&str] = &["docx", "docm", "dotx", "dotm", "doc", "dot", "odt",
+@@ -11,6 +11,7 @@ use wordcraft_ui_egui::{Inbox, Services, WordApp};
+ const DOC_EXTS: &[&str] = &["docx", "docm", "dotx", "dotm", "doc", "dot", "odt", "rtf", "txt", "md", "html", "htm", "tex", "json", "xml"];
  const IMAGE_EXTS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "bmp", "wmf", "emf"];
  const RECIPIENT_EXTS: &[&str] = &["csv", "tsv", "txt", "xlsx", "xlsm", "ods"];
- mod font_store;
 +mod delayance;
+ mod font_store;
  const CANVAS_ID: &str = "wordcraft_canvas";
  const LOADING_ID: &str = "wordcraft_loading";
- 
-@@ -58,13 +59,27 @@ pub fn start() {
+@@ -58,13 +59,39 @@ pub fn start() {
                      let doc = if sample { wordcraft_engine::sample::sample_document() } else { wordcraft_engine::blank_document(&region) };
                      let mut session = Session::new(doc);
                      session.system_region = region;
 -                    let mut app = WordApp::new(session, services(inbox.clone(), cc.egui_ctx.clone(), dirty, saves.clone()));
-+                    let bridge = if query().contains("delayance") { Some(delayance::Bridge::install(cc.egui_ctx.clone()).map_err(std::io::Error::other)?) } else { None };
++                    let bridge = if query().contains("delayance") {
++                        Some(delayance::Bridge::install(cc.egui_ctx.clone()).map_err(std::io::Error::other)?)
++                    } else {
++                        None
++                    };
 +                    let mut svc = services(inbox.clone(), cc.egui_ctx.clone(), dirty, saves.clone());
 +                    if let Some(bridge) = &bridge {
 +                        let downloads = bridge.downloads.clone();
 +                        let fallback = svc.download.take();
 +                        svc.download = Some(Box::new(move |name, bytes| {
 +                            if !name.to_ascii_lowercase().ends_with(".docx") {
-+                                return match &fallback { Some(download) => download(name, bytes), None => Err("Browser downloads unavailable".into()) };
++                                return match &fallback {
++                                    Some(download) => download(name, bytes),
++                                    None => Err("Browser downloads unavailable".into()),
++                                };
 +                            }
-+                            if downloads.borrow().len() >= 1 { return Err("A save is already queued".into()); }
++                            if downloads.borrow().len() >= 1 {
++                                return Err("A save is already queued".into());
++                            }
 +                            downloads.borrow_mut().push((name.into(), bytes.to_vec()));
 +                            Ok(())
 +                        }));
 +                    }
 +                    let mut app = WordApp::new(session, svc);
                      app.autosave = false;
++                    if bridge.is_some() {
++                        app.embedded = Some(Default::default());
++                    }
                      // No document to show: start on File › Home, as the desktop app does (#766).
 -                    if !sample {
 +                    if !sample && bridge.is_none() {
@@ -84,7 +96,7 @@ index f6ccc77..15c3ddb 100644
                  }),
              )
              .await;
-@@ -85,6 +100,7 @@ fn query() -> String {
+@@ -85,6 +112,7 @@ fn query() -> String {
  /// and feed them through the inbox.
  struct WebShell {
      app: WordApp,
@@ -92,13 +104,126 @@ index f6ccc77..15c3ddb 100644
      inbox: Inbox,
      saves: Rc<PickerSaves>,
  }
-@@ -138,7 +154,9 @@ impl eframe::App for WebShell {
+@@ -138,6 +166,9 @@ impl eframe::App for WebShell {
              });
          }
          self.settle_picker_saves();
-+        if let Some(bridge) = &mut self.bridge { bridge.before(&mut self.app); }
++        if let Some(bridge) = &mut self.bridge {
++            bridge.before(&mut self.app, ctx);
++        }
          self.app.logic(ctx);
-+        if let Some(bridge) = &mut self.bridge { bridge.after(&mut self.app, ctx); }
      }
- 
-     fn raw_input_hook(&mut self, _ctx: &egui::Context, raw: &mut egui::RawInput) {
+
+@@ -147,6 +178,9 @@ impl eframe::App for WebShell {
+
+     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+         self.app.ui(ui);
++        if let Some(bridge) = &mut self.bridge {
++            bridge.after(&mut self.app, ui.ctx());
++        }
+     }
+ }
+
+diff --git a/crates/ui-egui/src/lib.rs b/crates/ui-egui/src/lib.rs
+index af0385e..1666fbb 100644
+--- a/crates/ui-egui/src/lib.rs
++++ b/crates/ui-egui/src/lib.rs
+@@ -46,6 +46,7 @@ pub mod dialogs_review;
+ pub mod dialogs_ribbon;
+ pub mod dialogs_smart_art;
+ pub mod dialogs_templates;
++pub mod embedded;
+ pub mod equation_tab;
+ /// The built-in file browser, for desktops without a system file dialog (#576).
+ #[cfg(not(target_arch = "wasm32"))]
+@@ -353,6 +354,7 @@ fn migrate_units(v: &mut Value) {
+
+ /// The application.
+ pub struct WordApp {
++    pub embedded: Option<embedded::Embedded>,
+     pub session: Session,
+     pub ui: UiState,
+     pub services: Services,
+@@ -499,6 +501,7 @@ impl WordApp {
+             status_msg: None,
+             previews: previews::Previews::default(),
+             integrated_titlebar: false,
++            embedded: None,
+             control_rx: None,
+             shot_token: 0,
+             queued_shots: Vec::new(),
+@@ -634,6 +637,9 @@ impl WordApp {
+     /// Close, Envelopes, Labels and Finish & Merge on a document with unsaved changes first ask
+     /// Save / Don't Save / Cancel, and the command runs once that is answered (`ui.saveChanges`).
+     pub fn run(&mut self, id: &str, params: Value) -> Result<Value, String> {
++        if self.embedded.as_ref().is_some_and(|e| e.preview.is_some()) {
++            return Err("Accept or discard the AI preview before editing".into());
++        }
+         // A button whose command needs input the user hasn't given yet opens its dialog (#240).
+         if let Some(name) = input_dialog(id, &params)
+             && widgets::enabled(self, id)
+@@ -680,6 +686,9 @@ impl WordApp {
+     /// Run a command for a script or an agent (control channel, MCP bridge): never asks first.
+     /// UI-level commands (`ui.*`) are handled here, the rest by the engine.
+     pub fn execute(&mut self, id: &str, params: Value) -> Result<Value, String> {
++        if self.embedded.as_ref().is_some_and(|e| e.preview.is_some()) {
++            return Err("Accept or discard the AI preview before editing".into());
++        }
+         // A pending Change Picture only survives until the next action (#147).
+         if !matches!(id, "ui.changePicture" | "picture.change" | "insert.picture") {
+             self.change_picture_target = None;
+@@ -1576,6 +1585,9 @@ impl WordApp {
+             ctx.request_repaint();
+             return;
+         }
++        if let Some(host) = self.embedded.as_ref().and_then(|e| e.host.as_ref()) {
++            host.theme.install(&ctx);
++        }
+         let t = theme::Tokens::get(&ctx);
+         // Keytips are read before layout so the frame paints the new state; badges paint after
+         // the ribbon so they sit on top of it.
+@@ -1584,14 +1596,20 @@ impl WordApp {
+             backstage::show(self, ui);
+         } else if !self.has_document() {
+             // No document open (#1129): the ribbon greyed out but for Help, and no page.
+-            chrome::title_bar(self, ui);
++            if self.embedded.is_none() {
++                chrome::title_bar(self, ui);
++            }
+             ribbon::show(self, ui);
+             chrome::status_bar(self, ui);
++            embedded::reserve(self, ui);
+             egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.canvas)).show(ui, |_| {});
+         } else {
+-            chrome::title_bar(self, ui);
++            if self.embedded.is_none() {
++                chrome::title_bar(self, ui);
++            }
+             ribbon::show(self, ui);
+             chrome::status_bar(self, ui);
++            embedded::reserve(self, ui);
+             panes::show(self, ui);
+             egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.canvas)).show(ui, |ui| {
+                 canvas::show(self, ui);
+@@ -1619,6 +1637,8 @@ impl WordApp {
+             ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
+             self.sent_title = title;
+         }
++        embedded::preview(self, ui);
++        embedded::finish(self, ui);
+         self.frame_ms = now_ms() - t0;
+         // Typing and formatting land here, after `logic` has reported.
+         self.report_dirty();
+diff --git a/crates/ui-egui/src/theme.rs b/crates/ui-egui/src/theme.rs
+index 441ff2a..3004ef3 100644
+--- a/crates/ui-egui/src/theme.rs
++++ b/crates/ui-egui/src/theme.rs
+@@ -353,6 +353,7 @@ impl Tokens {
+         }
+     }
+     pub fn get(ctx: &egui::Context) -> Tokens {
+-        if ctx.global_style().visuals.dark_mode { Tokens::dark() } else { Tokens::light() }
++        ctx.data(|data| data.get_temp::<Tokens>(egui::Id::new("host_theme")))
++            .unwrap_or_else(|| if ctx.global_style().visuals.dark_mode { Tokens::dark() } else { Tokens::light() })
+     }
+ }

@@ -3,6 +3,8 @@ import { expect, request, test } from '@playwright/test';
 const API = process.env.PLAYWRIGHT_API_URL ?? 'http://localhost:48722';
 const WEB = process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:48721';
 
+test.use({ launchOptions: { args: ['--enable-unsafe-swiftshader'] } });
+
 test('local files support document creation, worker exports, signed downloads, and uploads', async () => {
   const api = await request.newContext({
     baseURL: API,
@@ -84,5 +86,54 @@ test('local files support document creation, worker exports, signed downloads, a
     if (projectId && headers) await api.delete(`/projects/${projectId}`, { headers });
     await api.dispose();
     await anonymous.dispose();
+  }
+});
+
+test('reloading a real project document releases its WOPI lock', async ({ page }) => {
+  page.on('dialog', (dialog) => void dialog.accept());
+  let projectId: string | undefined;
+  let headers: { Authorization: string } | undefined;
+  try {
+    const registered = await page.request.post(`${API}/auth/register`, {
+      headers: { Origin: new URL(WEB).origin },
+      data: {
+        email: `editor-reload-${crypto.randomUUID()}@example.test`,
+        firstName: 'Reload',
+        lastName: 'Fixture',
+        password: 'Synthetic-reload-1234!',
+        confirmPassword: 'Synthetic-reload-1234!',
+      },
+    });
+    expect(registered.status()).toBe(201);
+    headers = {
+      Authorization: `Bearer ${((await registered.json()) as { accessToken: string }).accessToken}`,
+    };
+    const project = await page.request.post(`${API}/projects`, {
+      headers,
+      data: { name: 'Editor reload fixture' },
+    });
+    expect(project.status()).toBe(201);
+    projectId = ((await project.json()) as { id: string }).id;
+    const created = await page.request.post(`${API}/projects/${projectId}/documents`, {
+      headers,
+      data: { title: 'Existing project reload' },
+    });
+    expect(created.status()).toBe(201);
+    const document = (await created.json()) as { id: string };
+    await page.goto(`/projects/${projectId}/documents/${document.id}`);
+    await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeEnabled({
+      timeout: 90000,
+    });
+    // A fresh page uses a new random lock. Becoming writable proves the server
+    // received the old page's release; unload beacons need not expose a response event.
+    await page.reload({ timeout: 30000 });
+    await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeEnabled({
+      timeout: 90000,
+    });
+    await expect(page.getByText(/Showing the last saved copy read-only/)).toHaveCount(0);
+  } finally {
+    if (!page.isClosed()) await page.close();
+    if (projectId && headers)
+      await page.request.delete(`${API}/projects/${projectId}`, { headers });
   }
 });

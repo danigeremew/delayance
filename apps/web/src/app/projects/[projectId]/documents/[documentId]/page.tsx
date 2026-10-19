@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { apiDownload, apiFetch } from '@/lib/api';
@@ -13,7 +13,8 @@ import { SidebarResizeHandle } from '@/components/sidebar-resize-handle';
 import { DocumentsList, LeftSidebarShell } from '@/components/left-sidebar';
 import { WordcraftEditor } from '@/components/wordcraft-editor';
 import { OfficeOutlinePanel } from '@/components/office-outline-panel';
-import type { EditorAdapter, EditorSaveState } from '@/editor/adapter';
+import { fitWorkspacePanels, type WordcraftLayout } from '@/editor/workspace-layout';
+import type { EditorAdapter, EditorCommand, EditorSaveState } from '@/editor/adapter';
 
 export default function WorkspacePage() {
   const { projectId, documentId } = useParams<{ projectId: string; documentId: string }>();
@@ -28,11 +29,38 @@ export default function WorkspacePage() {
   const setLeftWidth = useWorkspaceStore((state) => state.setLeftWidth);
   const setRightWidth = useWorkspaceStore((state) => state.setRightWidth);
   const setLeftTab = useWorkspaceStore((state) => state.setLeftTab);
+  const workspace = useRef<HTMLDivElement>(null);
+  const [workspaceWidth, setWorkspaceWidth] = useState(0);
+  const [layout, setLayout] = useState<WordcraftLayout | null>(null);
+  const panels = fitWorkspacePanels(
+    workspaceWidth,
+    leftOpen ? leftWidth : 0,
+    rightOpen ? rightWidth : 0,
+  );
   const [title, setTitle] = useState('Document');
   const [docs, setDocs] = useState<{ id: string; title: string }[]>([]);
   const [editor, setEditor] = useState<EditorAdapter | null>(null);
+  const [commandPending, setCommandPending] = useState(false);
   const [saveState, setSaveState] = useState<EditorSaveState>('loading');
   const [error, setError] = useState<string | null>(null);
+  const [lockConflict, setLockConflict] = useState(false);
+  const [editorGeneration, setEditorGeneration] = useState(0);
+  const [editorError, setEditorError] = useState<string | null>(null);
+  useEffect(() => {
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry) setWorkspaceWidth(entry.contentRect.width);
+    });
+    if (workspace.current) observer.observe(workspace.current);
+    return () => observer.disconnect();
+  }, []);
+  const runCommand = (command: EditorCommand) => {
+    if (!editor || commandPending) return;
+    setCommandPending(true);
+    void editor
+      .executeCommand(command)
+      .catch((cause) => setError(cause instanceof Error ? cause.message : 'Editor command failed.'))
+      .finally(() => setCommandPending(false));
+  };
   const loadDocs = useCallback(async () => {
     setDocs(await apiFetch<{ id: string; title: string }[]>(`/projects/${projectId}/documents`));
   }, [projectId]);
@@ -79,30 +107,70 @@ export default function WorkspacePage() {
           <div className="dl-app-topbar-title-block">
             <div className="dl-app-topbar-title-row">
               <h1 className="dl-app-topbar-title">{title}</h1>
-              <span className="dl-app-topbar-status">{saveState}</span>
+              <span className="dl-app-topbar-status">{lockConflict ? 'read-only' : saveState}</span>
             </div>
-            <span className="text-xs text-[var(--dl-muted)]">Wordcraft</span>
           </div>
-          <div className="dl-app-topbar-actions">
+          <div className="dl-app-topbar-actions" aria-busy={commandPending}>
             <button
               type="button"
               className="dl-topbar-btn"
+              disabled={
+                !layout?.writable ||
+                commandPending ||
+                layout.blocking ||
+                saveState === 'saving' ||
+                saveState === 'loading'
+              }
               onClick={() =>
                 void editor
                   ?.save()
                   .catch((cause) =>
-                    setError(cause instanceof Error ? cause.message : 'Could not save document.'),
+                    setEditorError(
+                      cause instanceof Error ? cause.message : 'Could not save document.',
+                    ),
                   )
               }
             >
               Save
             </button>
-            <button type="button" className="dl-topbar-btn" onClick={() => setLeftOpen(!leftOpen)}>
+            <button
+              type="button"
+              className="dl-topbar-btn"
+              aria-label="Undo"
+              disabled={!layout?.writable || !layout.canUndo || layout.blocking || commandPending}
+              onClick={() => runCommand({ type: 'undo' })}
+            >
+              ↶
+            </button>
+            <button
+              type="button"
+              className="dl-topbar-btn"
+              aria-label="Redo"
+              disabled={!layout?.writable || !layout.canRedo || layout.blocking || commandPending}
+              onClick={() => runCommand({ type: 'redo' })}
+            >
+              ↷
+            </button>
+            <button
+              type="button"
+              className="dl-topbar-btn"
+              disabled={!layout || layout.blocking || commandPending || saveState === 'loading'}
+              onClick={() => runCommand({ type: 'search-commands' })}
+            >
+              Search commands
+            </button>
+            <button
+              type="button"
+              className="dl-topbar-btn"
+              aria-expanded={panels.left > 0}
+              onClick={() => setLeftOpen(!leftOpen)}
+            >
               Tools
             </button>
             <button
               type="button"
               className="dl-topbar-btn"
+              aria-expanded={panels.right > 0}
               onClick={() => setRightOpen(!rightOpen)}
             >
               AI
@@ -110,16 +178,57 @@ export default function WorkspacePage() {
           </div>
         </div>
       </header>
-      {error ? (
-        <div className="border-b border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800">
-          {error}
+      {error || editorError ? (
+        <div
+          role="alert"
+          className="border-b border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800"
+        >
+          {error ?? editorError}
         </div>
       ) : null}
-      <div className="flex min-h-0 flex-1">
-        {leftOpen ? (
+      {lockConflict ? (
+        <div
+          role="status"
+          className="flex items-center justify-between gap-3 border-b border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+        >
+          <span>
+            Another editor holds this document’s editing lock. Showing the last saved copy
+            read-only. Close that editor, then retry editing.
+          </span>
+          <button
+            type="button"
+            className="dl-topbar-btn shrink-0"
+            onClick={() => setEditorGeneration((value) => value + 1)}
+          >
+            Retry editing
+          </button>
+        </div>
+      ) : null}
+      <div
+        ref={workspace}
+        className="relative min-h-0 flex-1 overflow-hidden"
+        data-testid="editor-workspace"
+      >
+        <main aria-label="Document workspace">
+          <WordcraftEditor
+            key={`${projectId}:${documentId}:${editorGeneration}`}
+            projectId={projectId}
+            documentId={documentId}
+            onAdapter={setAdapter}
+            onSaveState={setSaveState}
+            leftWidth={panels.left}
+            rightWidth={panels.right}
+            onLayout={setLayout}
+            onError={setEditorError}
+            onLockConflict={setLockConflict}
+          />
+        </main>
+        {panels.left > 0 ? (
           <aside
-            className="relative flex shrink-0 flex-col border-r border-[var(--dl-border)] bg-[var(--dl-panel)]"
-            style={{ width: leftWidth }}
+            aria-label="Document tools"
+            inert={layout?.blocking}
+            className="absolute left-0 flex flex-col border-r border-[var(--dl-border)] bg-[var(--dl-panel)]"
+            style={{ width: panels.left, top: layout?.top ?? 0, bottom: layout?.bottom ?? 0 }}
           >
             <LeftSidebarShell
               leftTab={leftTab}
@@ -174,7 +283,7 @@ export default function WorkspacePage() {
               ) : null}
               {leftTab === 'layout' ? (
                 <p className="dl-tools-empty">
-                  Use Wordcraft’s Layout ribbon for page and paragraph settings.
+                  Use the Layout tab above for page and paragraph settings.
                 </p>
               ) : null}
               {leftTab === 'io' ? (
@@ -190,31 +299,27 @@ export default function WorkspacePage() {
             <SidebarResizeHandle side="left" onResize={setLeftWidth} />
           </aside>
         ) : null}
-        <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          <WordcraftEditor
-            key={`${projectId}:${documentId}`}
+        <aside
+          aria-label="AI assistant"
+          inert={layout?.blocking}
+          className="dl-ai-sidebar absolute right-0 flex flex-col border-l border-[var(--dl-border)] bg-[var(--dl-panel)]"
+          style={{
+            display: panels.right > 0 ? undefined : 'none',
+            width: panels.right,
+            top: layout?.top ?? 0,
+            bottom: layout?.bottom ?? 0,
+          }}
+        >
+          <SidebarResizeHandle side="right" onResize={setRightWidth} />
+          <AiPanel
             projectId={projectId}
             documentId={documentId}
-            onAdapter={setAdapter}
-            onSaveState={setSaveState}
+            selectedNodeId={null}
+            editor={editor}
+            onCollapse={() => setRightOpen(false)}
+            onAccepted={() => setError(null)}
           />
-        </main>
-        {rightOpen ? (
-          <aside
-            className="dl-ai-sidebar relative flex shrink-0 flex-col border-l border-[var(--dl-border)] bg-[var(--dl-panel)]"
-            style={{ width: rightWidth }}
-          >
-            <SidebarResizeHandle side="right" onResize={setRightWidth} />
-            <AiPanel
-              projectId={projectId}
-              documentId={documentId}
-              selectedNodeId={null}
-              editor={editor}
-              onCollapse={() => setRightOpen(false)}
-              onAccepted={() => setError(null)}
-            />
-          </aside>
-        ) : null}
+        </aside>
       </div>
     </div>
   );

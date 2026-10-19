@@ -100,11 +100,15 @@ The model picker includes current text models such as `gemini-3.8-flash`, `gemin
 
 ### AI and Wordcraft
 
-Wordcraft is the sole browser document editor. Build it with `pnpm wordcraft:build` before opening a document. Its native ribbon owns formatting, pagination, comments, and DOCX import/export. Collabora discovery and its Docker service are no longer used.
+Wordcraft is the sole browser document editor. Build it with `pnpm wordcraft:build` before opening a document. Its native ribbon spans the Delayance workspace and owns formatting, pagination, comments, and DOCX import/export. Delayance supplies the shared document header and side panels. Rebuild after updating the integration; an older WASM build is rejected with a rebuild message. Collabora discovery and its Docker service are no longer used.
 
-The sidebar saves pending editor changes before generating a proposal. Ask and Review do not change files. Edit and Write preview proposed text, then require explicit acceptance. Acceptance verifies project permissions, the WOPI session, and the saved file version. Wordcraft validates native selection handles and document revisions before applying text; WOPI saves retain locks, immutable DOCX versions, and completion verification. Providers never write document records or DOCX XML directly.
+The sidebar saves pending editor changes before generating a proposal. Ask and Review do not change files. Edit and Write show a highlighted temporary preview at the cursor/selection captured before generation. Use ✓ beside the text to accept, or ✕ to discard. The ribbon and document editing pause until the preview is resolved. Ask/Review responses stay in the sidebar. The AI settings explain the saved-document context sent to Gemini; this normal disclosure is not shown as a warning. Acceptance verifies project permissions, the WOPI session, and the saved file version. Wordcraft validates native selection handles and document revisions before applying text; WOPI saves retain locks, immutable DOCX versions, and completion verification. Providers never write document records or DOCX XML directly.
 
 `POST /projects/:id/documents/:documentId/office/session` defaults to Wordcraft and accepts only `editor: "wordcraft"`. Removed editor values are rejected. `OFFICE_ENABLED=false` disables document editing sessions. The existing `/office/ai`, `/office-accept`, and `/office-complete` endpoints remain in use.
+
+When a document is already locked, Delayance opens the last saved copy read-only and offers **Retry editing** after the other editor closes. Page reload/close and in-app navigation release the exact owned lock using a small form POST beacon. A crashed browser can still leave a lock until `WOPI_LOCK_TTL_SECONDS` expires; Delayance never takes another editor’s lock automatically.
+
+`POST /wopi/files/:documentId/release?access_token=...` accepts a form body containing `lock`. It verifies the scoped WOPI session and write permission, then atomically releases only a matching lock. The simple form body permits cross-origin page-exit delivery without custom-header preflight requests. Existing WOPI lock and file-version checks remain mandatory for saves.
 
 ## Tests
 

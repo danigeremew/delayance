@@ -19,6 +19,7 @@ export type EditorCommand =
   | { type: 'undo' }
   | { type: 'redo' }
   | { type: 'find' }
+  | { type: 'search-commands' }
   | { type: 'uno'; command: string; args?: Record<string, unknown> };
 
 export interface EditorAdapter {
@@ -31,6 +32,17 @@ export interface EditorAdapter {
   getSelectedText(): Promise<string>;
   replaceSelection(handle: string, text: string): Promise<void>;
   insertText(handle: string, text: string): Promise<void>;
+  previewProposal(proposal: {
+    id: string;
+    handle: string;
+    action: 'insert' | 'replace';
+    text: string;
+  }): Promise<void>;
+  commitPreview(id: string): Promise<void>;
+  discardPreview(id: string): Promise<void>;
+  subscribePreview(
+    listener: (event: { id: string; decision: 'accept' | 'reject' }) => void,
+  ): () => void;
   navigateTo(location: DocumentLocation): Promise<void>;
   executeCommand(command: EditorCommand): Promise<void>;
   subscribe(listener: (state: EditorSaveState) => void): () => void;

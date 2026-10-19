@@ -1,0 +1,173 @@
+diff --git a/apps/wordcraft-web/Cargo.toml b/apps/wordcraft-web/Cargo.toml
+--- a/apps/wordcraft-web/Cargo.toml
++++ b/apps/wordcraft-web/Cargo.toml
+@@ -30,3 +30,3 @@
+ wasm-bindgen-futures = "0.4"
+ js-sys = "0.3"
+-web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlElement", "HtmlCanvasElement", "HtmlAnchorElement", "HtmlIFrameElement", "Blob", "BlobPropertyBag", "Url", "Location", "CssStyleDeclaration", "Event", "EventTarget", "BeforeUnloadEvent", "ClipboardEvent", "DataTransfer", "FileList", "File", "DomStringList", "IdbFactory", "IdbOpenDbRequest", "IdbRequest", "IdbDatabase", "IdbObjectStore", "IdbTransaction", "IdbTransactionMode", "MediaQueryList"] }
++web-sys = { version = "0.3", features = ["MessageEvent", "Window", "Document", "Element", "HtmlElement", "HtmlCanvasElement", "HtmlAnchorElement", "HtmlIFrameElement", "Blob", "BlobPropertyBag", "Url", "Location", "CssStyleDeclaration", "Event", "EventTarget", "BeforeUnloadEvent", "ClipboardEvent", "DataTransfer", "FileList", "File", "DomStringList", "IdbFactory", "IdbOpenDbRequest", "IdbRequest", "IdbDatabase", "IdbObjectStore", "IdbTransaction", "IdbTransactionMode", "MediaQueryList"] }
+diff --git a/apps/wordcraft-web/index.html b/apps/wordcraft-web/index.html
+--- a/apps/wordcraft-web/index.html
++++ b/apps/wordcraft-web/index.html
+@@ -6,5 +6,5 @@
+   <title>WordCraft</title>
+   <link data-trunk rel="icon" href="../../assets/app-icon/wordcraft.ico" />
+-  <link data-trunk rel="rust" data-bin="wordcraft-web" data-wasm-opt="z" data-weak-refs />
++  <link data-trunk rel="rust" data-bin="wordcraft-web" data-weak-refs />
+   <style>
+     html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #e6e6e6; }
+diff --git a/apps/wordcraft-web/src/main.rs b/apps/wordcraft-web/src/main.rs
+--- a/apps/wordcraft-web/src/main.rs
++++ b/apps/wordcraft-web/src/main.rs
+@@ -14,7 +14,11 @@
+
+ #[cfg(target_arch = "wasm32")]
+-fn main() {
++#[wasm_bindgen::prelude::wasm_bindgen(start)]
++pub fn delayance_start() {
+     web::start();
+ }
++
++#[cfg(target_arch = "wasm32")]
++fn main() {}
+
+ #[cfg(not(target_arch = "wasm32"))]
+diff --git a/apps/wordcraft-web/src/web.rs b/apps/wordcraft-web/src/web.rs
+--- a/apps/wordcraft-web/src/web.rs
++++ b/apps/wordcraft-web/src/web.rs
+@@ -12,4 +12,5 @@
+ const IMAGE_EXTS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "bmp", "wmf", "emf"];
+ const RECIPIENT_EXTS: &[&str] = &["csv", "tsv", "txt", "xlsx", "xlsm", "ods"];
++mod delayance;
+ mod font_store;
+ const CANVAS_ID: &str = "wordcraft_canvas";
+@@ -59,11 +60,37 @@
+                     let mut session = Session::new(doc);
+                     session.system_region = region;
+-                    let mut app = WordApp::new(session, services(inbox.clone(), cc.egui_ctx.clone(), dirty, saves.clone()));
++                    let bridge = if query().contains("delayance") {
++                        Some(delayance::Bridge::install(cc.egui_ctx.clone()).map_err(std::io::Error::other)?)
++                    } else {
++                        None
++                    };
++                    let mut svc = services(inbox.clone(), cc.egui_ctx.clone(), dirty, saves.clone());
++                    if let Some(bridge) = &bridge {
++                        let downloads = bridge.downloads.clone();
++                        let fallback = svc.download.take();
++                        svc.download = Some(Box::new(move |name, bytes| {
++                            if !name.to_ascii_lowercase().ends_with(".docx") {
++                                return match &fallback {
++                                    Some(download) => download(name, bytes),
++                                    None => Err("Browser downloads unavailable".into()),
++                                };
++                            }
++                            if downloads.borrow().len() >= 1 {
++                                return Err("A save is already queued".into());
++                            }
++                            downloads.borrow_mut().push((name.into(), bytes.to_vec()));
++                            Ok(())
++                        }));
++                    }
++                    let mut app = WordApp::new(session, svc);
+                     app.autosave = false;
++                    if bridge.is_some() {
++                        app.embedded = Some(Default::default());
++                    }
+                     // No document to show: start on File › Home, as the desktop app does (#766).
+-                    if !sample {
++                    if !sample && bridge.is_none() {
+                         app.start_screen();
+                     }
+-                    Ok(Box::new(WebShell { app, inbox, saves }))
++                    Ok(Box::new(WebShell { app, inbox, saves, bridge }))
+                 }),
+             )
+@@ -86,4 +113,5 @@
+ struct WebShell {
+     app: WordApp,
++    bridge: Option<delayance::Bridge>,
+     inbox: Inbox,
+     saves: Rc<PickerSaves>,
+@@ -139,4 +167,7 @@
+         }
+         self.settle_picker_saves();
++        if let Some(bridge) = &mut self.bridge {
++            bridge.before(&mut self.app, ctx);
++        }
+         self.app.logic(ctx);
+     }
+@@ -148,4 +179,7 @@
+     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+         self.app.ui(ui);
++        if let Some(bridge) = &mut self.bridge {
++            bridge.after(&mut self.app, ui.ctx());
++        }
+     }
+ }
+diff --git a/crates/ui-egui/src/lib.rs b/crates/ui-egui/src/lib.rs
+--- a/crates/ui-egui/src/lib.rs
++++ b/crates/ui-egui/src/lib.rs
+@@ -47,4 +47,5 @@
+ pub mod dialogs_smart_art;
+ pub mod dialogs_templates;
++pub mod embedded;
+ pub mod equation_tab;
+ /// The built-in file browser, for desktops without a system file dialog (#576).
+@@ -354,4 +355,5 @@
+ /// The application.
+ pub struct WordApp {
++    pub embedded: Option<embedded::Embedded>,
+     pub session: Session,
+     pub ui: UiState,
+@@ -500,4 +502,5 @@
+             previews: previews::Previews::default(),
+             integrated_titlebar: false,
++            embedded: None,
+             control_rx: None,
+             shot_token: 0,
+@@ -1577,4 +1580,7 @@
+             return;
+         }
++        if let Some(host) = self.embedded.as_ref().and_then(|e| e.host.as_ref()) {
++            host.theme.install(&ctx);
++        }
+         let t = theme::Tokens::get(&ctx);
+         // Keytips are read before layout so the frame paints the new state; badges paint after
+@@ -1585,12 +1591,18 @@
+         } else if !self.has_document() {
+             // No document open (#1129): the ribbon greyed out but for Help, and no page.
+-            chrome::title_bar(self, ui);
++            if self.embedded.is_none() {
++                chrome::title_bar(self, ui);
++            }
+             ribbon::show(self, ui);
+             chrome::status_bar(self, ui);
++            embedded::reserve(self, ui);
+             egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.canvas)).show(ui, |_| {});
+         } else {
+-            chrome::title_bar(self, ui);
++            if self.embedded.is_none() {
++                chrome::title_bar(self, ui);
++            }
+             ribbon::show(self, ui);
+             chrome::status_bar(self, ui);
++            embedded::reserve(self, ui);
+             panes::show(self, ui);
+             egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.canvas)).show(ui, |ui| {
+@@ -1620,4 +1632,5 @@
+             self.sent_title = title;
+         }
++        embedded::finish(self, ui);
+         self.frame_ms = now_ms() - t0;
+         // Typing and formatting land here, after `logic` has reported.
+diff --git a/crates/ui-egui/src/theme.rs b/crates/ui-egui/src/theme.rs
+--- a/crates/ui-egui/src/theme.rs
++++ b/crates/ui-egui/src/theme.rs
+@@ -354,5 +354,6 @@
+     }
+     pub fn get(ctx: &egui::Context) -> Tokens {
+-        if ctx.global_style().visuals.dark_mode { Tokens::dark() } else { Tokens::light() }
++        ctx.data(|data| data.get_temp::<Tokens>(egui::Id::new("host_theme")))
++            .unwrap_or_else(|| if ctx.global_style().visuals.dark_mode { Tokens::dark() } else { Tokens::light() })
+     }
+ }

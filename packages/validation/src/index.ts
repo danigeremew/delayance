@@ -4,6 +4,8 @@ export const officeSessionRequestSchema = z
   .object({ editor: z.literal('wordcraft').default('wordcraft') })
   .strict();
 
+export const officeReleaseLockSchema = z.object({ lock: z.string().min(1).max(1024) }).strict();
+
 const editorUrlSchema = z
   .string()
   .url()
@@ -20,8 +22,70 @@ export const wordcraftWopiInfoSchema = z.object({
 export const wordcraftSaveSchema = z.object({ version: z.number().int().nonnegative().safe() });
 export const wordcraftStatusSchema = z.object({
   MessageId: z.literal('App_LoadingStatus'),
-  Values: z.object({ Status: z.enum(['Frame_Ready', 'Document_Loaded']) }),
+  Values: z.object({
+    Status: z.enum(['Frame_Ready', 'Document_Loaded']),
+    embeddedLayout: z.literal(1).optional(),
+  }),
 });
+
+const wordcraftDimension = z.number().finite().min(0).max(100_000);
+export const wordcraftRectSchema = z.object({
+  x: wordcraftDimension,
+  y: wordcraftDimension,
+  width: wordcraftDimension,
+  height: wordcraftDimension,
+});
+const wordcraftColor = z.string().regex(/^#[0-9a-fA-F]{6}$/);
+export const wordcraftHostLayoutSchema = z.object({
+  left: wordcraftDimension,
+  right: wordcraftDimension,
+  theme: z.object({
+    background: wordcraftColor,
+    panel: wordcraftColor,
+    text: wordcraftColor,
+    muted: wordcraftColor,
+    border: wordcraftColor,
+    accent: wordcraftColor,
+  }),
+});
+export const wordcraftLayoutSchema = z
+  .object({
+    MessageId: z.literal('Delayance_Layout'),
+    Values: z.object({
+      embeddedLayout: z.literal(1),
+      width: wordcraftDimension.positive(),
+      height: wordcraftDimension.positive(),
+      top: wordcraftDimension,
+      bottom: wordcraftDimension,
+      center: wordcraftRectSchema,
+      overlays: z.array(wordcraftRectSchema).max(128),
+      blocking: z.boolean(),
+      writable: z.boolean(),
+      canUndo: z.boolean(),
+      canRedo: z.boolean(),
+      preview: z
+        .object({
+          id: z.string().min(1).max(100),
+          accept: wordcraftRectSchema,
+          discard: wordcraftRectSchema,
+        })
+        .nullable()
+        .optional(),
+    }),
+  })
+  .refine(({ Values: value }) => {
+    const within = (rect: { x: number; y: number; width: number; height: number }) =>
+      rect.x + rect.width <= value.width + 1 && rect.y + rect.height <= value.height + 1;
+    return (
+      value.top + value.bottom <= value.height + 1 &&
+      within(value.center) &&
+      value.overlays.every(within) &&
+      (!value.preview || (within(value.preview.accept) && within(value.preview.discard)))
+    );
+  }, 'Editor geometry must fit its viewport');
+
+export type WordcraftLayout = z.infer<typeof wordcraftLayoutSchema>['Values'];
+export type WordcraftHostLayout = z.infer<typeof wordcraftHostLayoutSchema>;
 
 export const wordcraftModifiedSchema = z.object({
   MessageId: z.literal('Doc_ModifiedStatus'),
@@ -186,3 +250,10 @@ export const resetPasswordSchema = z
     message: 'Passwords do not match',
     path: ['confirmPassword'],
   });
+
+export const wordcraftPreviewDecisionSchema = z.object({
+  MessageId: z.literal('Delayance_PreviewDecision'),
+  Values: z
+    .object({ id: z.string().min(1).max(100), decision: z.enum(['accept', 'reject']) })
+    .strict(),
+});

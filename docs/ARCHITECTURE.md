@@ -43,6 +43,8 @@ Protected routes return HTTP 401 when a bearer token is missing so the web clien
 
 Editable documents are DOCX files in isolated, content-addressed local file storage. Wordcraft is the sole browser editor and owns editing, formatting, pagination and DOCX import/export; PostgreSQL keeps metadata and Delayance's extracted analysis representation.
 
+The shared workspace places Wordcraft’s native ribbon and status bar across the app beneath Delayance’s header. The embedded Rust layout reserves host sidebar widths; validated geometry and overlay messages clip the iframe so React panels remain interactive and native menus/dialogs appear above them. Header history and command search dispatch through the existing narrow command bridge.
+
 Its host bridge uses authorized WOPI sessions, locks, immutable DOCX storage, version creation, analysis, and AI acceptance. Native range handles include the document revision and selection positions. No database document model or direct provider writes are added. See [Wordcraft integration](../integrations/wordcraft/README.md) for build steps and limitations. PostgreSQL runs as a local service; Compose starts only Redis.
 
 ### AI safety
@@ -51,7 +53,7 @@ AI providers must never write document content directly to the database.
 
 Pipeline: text proposal → revision/permission validation → preview → accept/reject → editor bridge → WOPI save/version history.
 
-The Wordcraft sidebar uses the office AI endpoint, which extracts context from the current immutable DOCX and stores validated `office-text` revisions in proposal metadata. Ask/Review generate answers without revisions; Edit/Write remain pending until explicit acceptance. Acceptance verifies a user-scoped writable WOPI session and the original file hash/version before Wordcraft applies the revision to its validated native selection. Completion checks the newly saved DOCX before marking a proposal accepted. Legacy JSON operations are rejected for office-backed documents.
+The Wordcraft sidebar uses the office AI endpoint, which extracts context from the current immutable DOCX and stores validated `office-text` revisions in proposal metadata. Ask/Review generate answers without revisions; Edit/Write capture the native caret or selection before generation and stage a highlighted preview in Wordcraft. A separate provisional session renders the text while the original session (including selection, revision and undo history) remains intact. Native ✓/✕ controls send origin-checked decisions to the host; no preview bytes can be saved. Acceptance authorizes through the API before restoring the original session and inserting the text once. Discard restores the original session without saving. The assistant stays mounted when hidden so it continues handling preview decisions. Acceptance verifies a user-scoped writable WOPI session and the original file hash/version before Wordcraft applies the revision to its validated native selection. Completion checks the newly saved DOCX before marking a proposal accepted. Legacy JSON operations are rejected for office-backed documents.
 
 ### Deterministic document processing
 

@@ -1,5 +1,6 @@
 import {
   wordcraftReplySchema,
+  wordcraftPreviewDecisionSchema,
   wordcraftSelectionSchema,
   wordcraftStatusSchema,
   wordcraftModifiedSchema,
@@ -17,6 +18,9 @@ import type {
 export class WordcraftEditorAdapter implements EditorAdapter {
   private state: EditorSaveState = 'loading';
   private readonly listeners = new Set<(state: EditorSaveState) => void>();
+  private readonly previewListeners = new Set<
+    (event: { id: string; decision: 'accept' | 'reject' }) => void
+  >();
   private saveRequest: { resolve: () => void; reject: (error: Error) => void } | null = null;
   private readonly requests = new Map<
     string,
@@ -31,6 +35,7 @@ export class WordcraftEditorAdapter implements EditorAdapter {
 
   async openDocument() {}
   async focus() {
+    this.officeFrame.focus();
     this.send('Action_Focus');
   }
   getSaveState() {
@@ -86,6 +91,34 @@ export class WordcraftEditorAdapter implements EditorAdapter {
     await this.request('insert', { handle, text });
     this.setState('dirty');
   }
+  async previewProposal(proposal: {
+    id: string;
+    handle: string;
+    action: 'insert' | 'replace';
+    text: string;
+  }) {
+    try {
+      await this.request('preview', proposal);
+    } catch (cause) {
+      if (cause instanceof Error && cause.message === 'Unsupported editor request') {
+        throw new Error(
+          'Rebuild Wordcraft with pnpm wordcraft:build, then reopen this document to preview AI text.',
+        );
+      }
+      throw cause;
+    }
+  }
+  async commitPreview(id: string) {
+    await this.request('preview-commit', { id });
+    this.setState('dirty');
+  }
+  async discardPreview(id: string) {
+    await this.request('preview-discard', { id });
+  }
+  subscribePreview(listener: (event: { id: string; decision: 'accept' | 'reject' }) => void) {
+    this.previewListeners.add(listener);
+    return () => this.previewListeners.delete(listener);
+  }
   async navigateTo(location: DocumentLocation) {
     if (!location.excerpt) throw new Error('Use Wordcraft’s navigation pane for this location.');
     await this.request('command', {
@@ -94,9 +127,14 @@ export class WordcraftEditorAdapter implements EditorAdapter {
     });
   }
   async executeCommand(command: EditorCommand) {
+    this.officeFrame.focus();
     if (command.type === 'save') return this.save();
     if (command.type === 'undo' || command.type === 'redo') {
       await this.request('command', { command: `edit.${command.type}` });
+      return;
+    }
+    if (command.type === 'search-commands') {
+      await this.request('command', { command: 'tools.search' });
       return;
     }
     if (command.type === 'find') {
@@ -115,7 +153,7 @@ export class WordcraftEditorAdapter implements EditorAdapter {
       '.uno:Zoom100Percent': 'view.zoom100',
     };
     const id = commands[command.command];
-    if (!id) throw new Error('Use Wordcraft’s ribbon for this command.');
+    if (!id) throw new Error('Use the editing ribbon for this command.');
     await this.request('command', { command: id });
   }
   handleMessage(event: MessageEvent) {
@@ -127,6 +165,11 @@ export class WordcraftEditorAdapter implements EditorAdapter {
       } catch {
         return;
       }
+    }
+    const decision = wordcraftPreviewDecisionSchema.safeParse(data);
+    if (decision.success) {
+      this.previewListeners.forEach((listener) => listener(decision.data.Values));
+      return;
     }
     const reply = wordcraftReplySchema.safeParse(data);
     if (reply.success) {
@@ -165,6 +208,7 @@ export class WordcraftEditorAdapter implements EditorAdapter {
     this.saveRequest?.reject(new Error('Editor disposed.'));
     this.saveRequest = null;
     this.listeners.clear();
+    this.previewListeners.clear();
   }
   private setState(state: EditorSaveState) {
     this.state = state;

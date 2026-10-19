@@ -12,7 +12,7 @@ afterEach(() => {
 function setup() {
   const postMessage = vi.fn();
   const source = { postMessage };
-  const frame = { contentWindow: source } as unknown as HTMLIFrameElement;
+  const frame = { contentWindow: source, focus: vi.fn() } as unknown as HTMLIFrameElement;
   const adapter = new WordcraftEditorAdapter(frame, 'http://wordcraft.test', 'wopi-token');
   const reply = (data: unknown, origin = 'http://wordcraft.test') =>
     adapter.handleMessage({
@@ -46,6 +46,22 @@ describe('Wordcraft native-range bridge', () => {
     respond({ text: 'forged', handle: '99', isCollapsed: false }, true, 'http://other.test');
     respond({ text: 'Original', handle: '1', isCollapsed: false });
     expect(await selection).toEqual({ text: 'Original', handle: '1', isCollapsed: false });
+  });
+  it('routes command search and history through the narrow native bridge', async () => {
+    const { adapter, postMessage, respond } = setup();
+    for (const [type, command] of [
+      ['search-commands', 'tools.search'],
+      ['undo', 'edit.undo'],
+      ['redo', 'edit.redo'],
+    ] as const) {
+      const pending = adapter.executeCommand({ type });
+      expect(JSON.parse(postMessage.mock.lastCall![0]).Values).toMatchObject({
+        method: 'command',
+        params: { command },
+      });
+      respond({});
+      await pending;
+    }
   });
   it('surfaces a stale native range instead of pasting elsewhere', async () => {
     const { adapter, respond, postMessage } = setup();
@@ -112,5 +128,79 @@ describe('Wordcraft native-range bridge', () => {
     await vi.advanceTimersByTimeAsync(30000);
     await rejected;
     expect(adapter.getSaveState()).toBe('error');
+  });
+});
+
+describe('inline AI previews', () => {
+  it('stages without dirtying the saved document, then commits exactly once through a separate request', async () => {
+    const { adapter, respond, postMessage } = setup();
+    const staging = adapter.previewProposal({
+      id: 'proposal',
+      handle: '1',
+      action: 'insert',
+      text: 'Draft',
+    });
+    expect(JSON.parse(postMessage.mock.lastCall![0]).Values.method).toBe('preview');
+    respond({});
+    await staging;
+    expect(adapter.getSaveState()).toBe('saved');
+    const commit = adapter.commitPreview('proposal');
+    expect(JSON.parse(postMessage.mock.lastCall![0]).Values.method).toBe('preview-commit');
+    respond({});
+    await commit;
+    expect(adapter.getSaveState()).toBe('dirty');
+  });
+  it('validates decisions, origins, sources and subscription cleanup', () => {
+    const { adapter, reply } = setup();
+    const listener = vi.fn();
+    const unsubscribe = adapter.subscribePreview(listener);
+    const message = {
+      MessageId: 'Delayance_PreviewDecision',
+      Values: { id: 'proposal', decision: 'accept' },
+    };
+    reply(message, 'https://foreign.test');
+    adapter.handleMessage({
+      origin: 'http://wordcraft.test',
+      source: null,
+      data: message,
+    } as MessageEvent);
+    reply({ ...message, Values: { id: 'proposal', decision: 'apply' } });
+    expect(listener).not.toHaveBeenCalled();
+    reply(message);
+    expect(listener).toHaveBeenCalledWith(message.Values);
+    unsubscribe();
+    reply(message);
+    expect(listener).toHaveBeenCalledTimes(1);
+    adapter.subscribePreview(listener);
+    adapter.dispose();
+    reply(message);
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+  it('gives an actionable rebuild error for an older WASM bridge', async () => {
+    const { adapter, postMessage, reply } = setup();
+    const preview = adapter.previewProposal({
+      id: 'proposal',
+      handle: '1',
+      action: 'insert',
+      text: 'Draft',
+    });
+    const request = JSON.parse(postMessage.mock.lastCall![0]);
+    reply({
+      MessageId: 'Delayance_Reply',
+      Values: {
+        requestId: request.Values.requestId,
+        ok: false,
+        error: 'Unsupported editor request',
+      },
+    });
+    await expect(preview).rejects.toThrow('pnpm wordcraft:build');
+  });
+  it('discarding does not dirty or save the document', async () => {
+    const { adapter, respond, postMessage } = setup();
+    const discard = adapter.discardPreview('proposal');
+    expect(JSON.parse(postMessage.mock.lastCall![0]).Values.method).toBe('preview-discard');
+    respond({});
+    await discard;
+    expect(adapter.getSaveState()).toBe('saved');
   });
 });

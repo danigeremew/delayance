@@ -357,7 +357,23 @@ body {
   cursor: pointer;
 }
 
-.dl-topbar-btn:hover {
+.dl-topbar-btn:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+@media (max-width: 700px) {
+  .dl-app-topbar-main {
+    flex-wrap: wrap;
+  }
+  .dl-app-topbar-actions {
+    width: 100%;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+  }
+}
+
+.dl-topbar-btn:hover:not(:disabled) {
   background: color-mix(in srgb, var(--dl-fg) 6%, transparent);
 }
 

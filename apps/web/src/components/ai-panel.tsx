@@ -299,6 +299,17 @@ export function AiPanel({
   const fileRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const bootstrapped = useRef(false);
+  const [inlineId, setInlineId] = useState<string | null>(null);
+  const appliedIds = useRef(new Set<string>());
+  const stagedProposals = useRef(new Map<string, Proposal>());
+  const accepting = useRef(false);
+  const decisionHandler = useRef<(event: { id: string; decision: 'accept' | 'reject' }) => void>(
+    () => {},
+  );
+  useEffect(() => {
+    setInlineId(null);
+    return editor?.subscribePreview((event) => decisionHandler.current(event));
+  }, [editor]);
 
   const loadChats = useCallback(async () => {
     const list = await apiFetch<Chat[]>(`/projects/${projectId}/documents/${documentId}/ai/chats`);
@@ -493,7 +504,7 @@ export function AiPanel({
 
   const run = async (opts?: { preferredMode?: 'edit' | 'write'; instruction?: string }) => {
     const prompt = (opts?.instruction ?? instruction).trim();
-    if (!prompt || busy) return;
+    if (!prompt || busy || inlineId) return;
     setBusy(true);
     setError(null);
     const ac = new AbortController();
@@ -520,14 +531,20 @@ export function AiPanel({
       if (editor !== undefined) {
         if (!editor) throw new Error('Wait for the document editor to load.');
         await editor.save();
-        // Capture the editor-owned selection and text for the proposal,
-        // then require the same text to be selected again at explicit acceptance.
-        const selection =
-          mode === 'edit' || mode === 'auto' || opts?.preferredMode === 'edit'
-            ? await editor.getSelection()
-            : null;
+        // Capture before generation, including a collapsed caret for Write.
+        const selection = mode === 'ask' || mode === 'review' ? null : await editor.getSelection();
+        if (
+          (opts?.preferredMode === 'write' || mode === 'write') &&
+          selection &&
+          !selection.isCollapsed
+        ) {
+          throw new Error(
+            'Place the cursor without selecting text for Write, or choose Edit to replace the selection.',
+          );
+        }
         const result = await apiFetch<{
           chatId: string;
+          proposal: Proposal;
           externalProviderWarning: string | null;
           validation: { ok: boolean; errors: string[] };
         }>(`/projects/${projectId}/documents/${documentId}/office/ai`, {
@@ -545,6 +562,22 @@ export function AiPanel({
         if (!opts?.instruction) setInstruction('');
         setActiveChatId(result.chatId);
         await Promise.all([loadChats(), loadProposals(result.chatId)]);
+        const revision = officeRevision(result.proposal?.ops[0]);
+        if (
+          revision &&
+          selection &&
+          result.proposal.status === 'pending' &&
+          (result.proposal.mode === 'write' || result.proposal.mode === 'edit')
+        ) {
+          await editor.previewProposal({
+            id: result.proposal.id,
+            handle: selection.handle,
+            action: revision.action,
+            text: revision.text,
+          });
+          stagedProposals.current.set(result.proposal.id, result.proposal);
+          setInlineId(result.proposal.id);
+        }
         return;
       }
 
@@ -698,34 +731,27 @@ export function AiPanel({
   };
 
   const accept = async (id: string) => {
-    if (busy) return;
+    if (busy || accepting.current) return;
+    accepting.current = true;
     setBusy(true);
     setError(null);
     try {
-      const proposal = proposals.find((item) => item.id === id);
+      const proposal = stagedProposals.current.get(id) ?? proposals.find((item) => item.id === id);
       const revision = officeRevision(proposal?.ops[0]);
       if (revision) {
         if (!editor) throw new Error('Wait for the document editor to load.');
-        await editor.save();
-        const selection = await editor.getSelection();
-        if (revision.action === 'replace' && selection.text !== revision.originalText) {
-          throw new Error(
-            'Select the original text shown in the preview in the document editor, then apply.',
-          );
-        }
-        if (revision.action === 'insert' && !selection.isCollapsed) {
-          throw new Error(
-            'Place the cursor where the new text should be inserted, without selecting text.',
-          );
-        }
         const body = JSON.stringify({ accessToken: editor.getSessionToken() });
-        await apiFetch(`/projects/${projectId}/ai/proposals/${id}/office-accept`, {
-          method: 'POST',
-          body,
-        });
-        if (revision.action === 'replace')
-          await editor.replaceSelection(selection.handle, revision.text);
-        else await editor.insertText(selection.handle, revision.text);
+        if (!appliedIds.current.has(id)) {
+          if (inlineId !== id)
+            throw new Error('Preview this proposal in the document before accepting.');
+          await apiFetch(`/projects/${projectId}/ai/proposals/${id}/office-accept`, {
+            method: 'POST',
+            body,
+          });
+          await editor.commitPreview(id);
+          appliedIds.current.add(id);
+          setInlineId(null);
+        }
         await editor.save();
         // Retry completion while the saved DOCX snapshot becomes available.
         // Retry verification, never the paste, while the immutable file version arrives.
@@ -755,21 +781,72 @@ export function AiPanel({
           body: '{}',
         });
       }
+      stagedProposals.current.delete(id);
       await loadProposals(activeChatId);
       onAccepted();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not apply proposal');
     } finally {
+      accepting.current = false;
       setBusy(false);
     }
   };
 
   const reject = async (id: string) => {
-    await apiFetch(`/projects/${projectId}/ai/proposals/${id}/reject`, {
-      method: 'POST',
-      body: '{}',
-    });
-    await loadProposals(activeChatId);
+    if (busy || accepting.current) return;
+    if (appliedIds.current.has(id)) {
+      setError('This text was already inserted. Retry saving to finish.');
+      return;
+    }
+    accepting.current = true;
+    setBusy(true);
+    setError(null);
+    try {
+      if (inlineId === id && editor) {
+        await editor.discardPreview(id);
+        setInlineId(null);
+      }
+      await apiFetch(`/projects/${projectId}/ai/proposals/${id}/reject`, {
+        method: 'POST',
+        body: '{}',
+      });
+      stagedProposals.current.delete(id);
+      await loadProposals(activeChatId);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not discard proposal');
+    } finally {
+      accepting.current = false;
+      setBusy(false);
+    }
+  };
+
+  const previewProposal = async (proposal: Proposal) => {
+    if (!editor || busy || inlineId) return;
+    try {
+      setError(null);
+      const revision = officeRevision(proposal.ops[0]);
+      if (!revision) return;
+      const selection = await editor.getSelection();
+      if (revision.action === 'replace' && selection.text !== revision.originalText)
+        throw new Error('Select the original text before previewing this edit.');
+      await editor.previewProposal({
+        id: proposal.id,
+        handle: selection.handle,
+        action: revision.action,
+        text: revision.text,
+      });
+      stagedProposals.current.set(proposal.id, proposal);
+      setInlineId(proposal.id);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not preview proposal');
+    }
+  };
+  decisionHandler.current = (event) => {
+    if (event.id !== inlineId) return;
+    void (event.decision === 'accept' ? accept(event.id) : reject(event.id)).catch(
+      (cause: unknown) =>
+        setError(cause instanceof Error ? cause.message : 'Could not resolve preview'),
+    );
   };
 
   const archiveChat = async (chatId: string, e: MouseEvent) => {
@@ -948,6 +1025,11 @@ export function AiPanel({
 
       {showSettings ? (
         <div className="dl-ai-settings">
+          <p className="dl-ai-settings-description">
+            AI context: your prompt, saved document text, selection, and relevant project context
+            are sent to the configured Gemini service. Write and Edit appear as a preview in the
+            document; accepting a preview saves it. Ask and Review stay in this sidebar.
+          </p>
           <div className="dl-ai-settings-card">
             <div className="flex items-center justify-between">
               <span className="dl-ai-section-label" style={{ margin: 0 }}>
@@ -1187,29 +1269,21 @@ export function AiPanel({
                       : ''}
                   </span>
                 </div>
-                {p.answer ? <p className="dl-ai-bubble-body">{p.answer}</p> : null}
+                {p.answer && !officeRevision(p.ops[0]) ? (
+                  <p className="dl-ai-bubble-body">{p.answer}</p>
+                ) : null}
                 {!p.answer && (p.mode === 'ask' || p.mode === 'auto') ? (
                   <p className="dl-ai-empty-copy">(empty reply)</p>
                 ) : null}
 
-                {officeRevision(p.ops[0]) ? (
-                  <div className="dl-ai-bubble-body">
-                    {officeRevision(p.ops[0])!.action === 'replace' ? (
-                      <>
-                        <strong>Original text</strong>
-                        <pre className="whitespace-pre-wrap">
-                          {officeRevision(p.ops[0])!.originalText}
-                        </pre>
-                      </>
-                    ) : null}
-                    <strong>Proposed text</strong>
-                    <pre className="whitespace-pre-wrap">{officeRevision(p.ops[0])!.text}</pre>
-                    <p>
-                      {officeRevision(p.ops[0])!.action === 'replace'
-                        ? 'Select the original text in the document editor, then apply.'
-                        : 'Place the cursor in the document editor where you want this text, then apply.'}
-                    </p>
-                  </div>
+                {officeRevision(p.ops[0]) && p.status === 'pending' ? (
+                  <p className="dl-ai-bubble-body">
+                    {inlineId === p.id
+                      ? 'Preview highlighted in the document. Choose ✓ to keep it or ✕ to discard it.'
+                      : appliedIds.current.has(p.id)
+                        ? 'Text inserted. Retry saving to finish verification.'
+                        : 'Place the cursor (Write) or select the original text (Edit), then preview in the document.'}
+                  </p>
                 ) : null}
 
                 {p.citedSourceIds?.length ? (
@@ -1257,15 +1331,28 @@ export function AiPanel({
                 {p.status === 'pending' &&
                 p.mode !== 'ask' &&
                 p.mode !== 'auto' &&
+                p.mode !== 'review' &&
                 p.ops.length > 0 ? (
                   <div className="dl-ai-actions">
                     <button
                       type="button"
                       className="dl-ai-btn dl-ai-btn-primary"
                       disabled={busy}
-                      onClick={() => void accept(p.id)}
+                      onClick={() =>
+                        void (officeRevision(p.ops[0]) &&
+                        inlineId !== p.id &&
+                        !appliedIds.current.has(p.id)
+                          ? previewProposal(p)
+                          : accept(p.id))
+                      }
                     >
-                      Apply to document
+                      {officeRevision(p.ops[0])
+                        ? appliedIds.current.has(p.id)
+                          ? 'Retry saving'
+                          : inlineId === p.id
+                            ? 'Accept preview'
+                            : 'Preview in document'
+                        : 'Apply to document'}
                     </button>
                     <button type="button" className="dl-ai-btn" onClick={() => void reject(p.id)}>
                       Discard
@@ -1284,7 +1371,11 @@ export function AiPanel({
             <div className="dl-ai-typing">
               <span className="dl-ai-spinner" />
               <span>
-                {mode === 'write' || mode === 'auto' ? 'Preparing proposal…' : 'Thinking…'}
+                {accepting.current
+                  ? 'Updating document…'
+                  : mode === 'write' || mode === 'auto'
+                    ? 'Preparing proposal…'
+                    : 'Thinking…'}
               </span>
             </div>
           ) : null}
@@ -1293,6 +1384,11 @@ export function AiPanel({
 
       {!showHistory && !showSettings ? (
         <div className="dl-ai-composer-wrap">
+          {inlineId ? (
+            <p className="dl-ai-empty-copy">
+              Accept or discard the highlighted preview before sending another prompt.
+            </p>
+          ) : null}
           {error ? (
             <div className="dl-ai-error-wrap">
               <p className="dl-ai-error">{error}</p>
@@ -1392,7 +1488,9 @@ export function AiPanel({
                 >
                   <IconClip />
                 </button>
-                {busy ? (
+                {busy && accepting.current ? (
+                  <span role="status" aria-label="Updating document" className="dl-ai-spinner" />
+                ) : busy ? (
                   <button
                     type="button"
                     className="dl-ai-send is-stop"
@@ -1413,7 +1511,7 @@ export function AiPanel({
                           ? 'Send (auto)'
                           : 'Generate proposal'
                     }
-                    disabled={!instruction.trim()}
+                    disabled={!instruction.trim() || !!inlineId}
                     onClick={() => void run()}
                     aria-label="Send"
                   >
