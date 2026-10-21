@@ -284,11 +284,12 @@ export function AiPanel({
     baseUrl?: string | null;
     hasApiKey?: boolean;
     hasCustomApiKey?: boolean;
+    hasAccountApiKey?: boolean;
+    keySource?: 'account' | 'project' | 'server' | null;
   } | null>(null);
   const [sources, setSources] = useState<SourceRow[]>([]);
   const [menuOpen, setMenuOpen] = useState<'mode' | 'model' | null>(null);
   const [apiKeyInput, setApiKeyInput] = useState('');
-  const [apiKeyChanged, setApiKeyChanged] = useState(false);
   const [showApiKey, setShowApiKey] = useState(false);
   const [selectedModel, setSelectedModel] = useState<string>('gemini-3.8-flash');
   const [selectedPolicy, setSelectedPolicy] = useState<'any' | 'local_only'>('any');
@@ -299,6 +300,12 @@ export function AiPanel({
   const fileRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const bootstrapped = useRef(false);
+  useEffect(
+    () => () => {
+      abortRef.current?.abort();
+    },
+    [],
+  );
   const [inlineId, setInlineId] = useState<string | null>(null);
   const appliedIds = useRef(new Set<string>());
   const stagedProposals = useRef(new Map<string, Proposal>());
@@ -381,6 +388,8 @@ export function AiPanel({
             baseUrl: string | null;
             hasApiKey: boolean;
             hasCustomApiKey?: boolean;
+            hasAccountApiKey?: boolean;
+            keySource?: 'account' | 'project' | 'server' | null;
           }>(`/projects/${projectId}/ai-settings`),
           apiFetch<SourceRow[]>(`/projects/${projectId}/sources`),
           loadChats(),
@@ -432,14 +441,14 @@ export function AiPanel({
         method: 'PUT',
         body: JSON.stringify({ model }),
       });
-      setSettings({ ...settings, model });
+      setSettings((current) => (current ? { ...current, model } : current));
       setSelectedModel(model);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not update model');
     }
   };
 
-  const saveSettings = async (opts?: { clearApiKey?: boolean }) => {
+  const saveSettings = async (opts?: { clearApiKey?: boolean; scope?: 'account' | 'project' }) => {
     setSettingsSaving(true);
     setSettingsSuccess(null);
     setSettingsError(null);
@@ -448,6 +457,7 @@ export function AiPanel({
         model?: string;
         policy?: 'any' | 'local_only';
         apiKey?: string | null;
+        apiKeyScope?: 'account' | 'project';
       } = {
         model: selectedModel.trim() || undefined,
         policy: selectedPolicy,
@@ -455,8 +465,10 @@ export function AiPanel({
 
       if (opts?.clearApiKey) {
         payload.apiKey = null;
-      } else if (apiKeyChanged && apiKeyInput.trim()) {
+        payload.apiKeyScope = opts.scope ?? 'account';
+      } else if (apiKeyInput.trim()) {
         payload.apiKey = apiKeyInput.trim();
+        payload.apiKeyScope = 'account';
       }
 
       const updated = await apiFetch<{
@@ -466,6 +478,8 @@ export function AiPanel({
         baseUrl: string | null;
         hasApiKey: boolean;
         hasCustomApiKey?: boolean;
+        hasAccountApiKey?: boolean;
+        keySource?: 'account' | 'project' | 'server' | null;
       }>(`/projects/${projectId}/ai-settings`, {
         method: 'PUT',
         body: JSON.stringify(payload),
@@ -474,13 +488,13 @@ export function AiPanel({
       setSettings(updated);
       setSelectedModel(updated.model || 'gemini-3.8-flash');
       setSelectedPolicy((updated.policy as 'any' | 'local_only') || 'any');
-      if (opts?.clearApiKey) setApiKeyInput('');
-      setApiKeyChanged(false);
+      setApiKeyInput('');
+      setShowApiKey(false);
       setSettingsSuccess(
         opts?.clearApiKey
-          ? 'Custom API key removed.'
+          ? 'Saved API key removed.'
           : payload.apiKey
-            ? 'Gemini API key and settings saved successfully.'
+            ? 'Gemini API key saved for all your projects.'
             : 'Settings saved successfully.',
       );
       setError(null);
@@ -1049,9 +1063,11 @@ export function AiPanel({
             </div>
             <p className="dl-ai-settings-description">
               {settings?.hasApiKey
-                ? settings.hasCustomApiKey
-                  ? 'Custom project key active (stored encrypted).'
-                  : 'Server default Gemini key active.'
+                ? settings.hasAccountApiKey
+                  ? 'Your account key is active across your projects (stored encrypted).'
+                  : settings.hasCustomApiKey
+                    ? 'Existing project key active (stored encrypted).'
+                    : 'Server default Gemini key active.'
                 : 'A Google Gemini API key is required to use AI features.'}
             </p>
           </div>
@@ -1078,12 +1094,14 @@ export function AiPanel({
             <div className="dl-ai-settings-field">
               <label htmlFor="gemini-api-key">Gemini API Key</label>
               <span className="dl-field-hint">
-                Show reveals the key entered here. Previously saved keys are not returned.
+                Saved to your account for all your projects, including after browser restarts. Leave
+                blank to keep the saved key.
               </span>
               <div className="dl-ai-settings-input-row">
                 <input
                   id="gemini-api-key"
-                  type={showApiKey ? 'text' : 'password'}
+                  type="text"
+                  className={showApiKey ? undefined : 'dl-ai-key-masked'}
                   name="gemini-api-token"
                   data-1p-ignore="true"
                   data-lpignore="true"
@@ -1091,13 +1109,14 @@ export function AiPanel({
                   value={apiKeyInput}
                   onChange={(e) => {
                     setApiKeyInput(e.target.value);
-                    setApiKeyChanged(true);
                   }}
                   placeholder={
                     settings?.hasApiKey ? 'Key saved — leave blank to keep it' : 'AIzaSy...'
                   }
                   autoComplete="off"
                   spellCheck={false}
+                  autoCapitalize="none"
+                  autoCorrect="off"
                 />
                 <button
                   type="button"
@@ -1111,15 +1130,25 @@ export function AiPanel({
                   {showApiKey ? 'Hide' : 'Show'}
                 </button>
               </div>
+              {settings?.hasAccountApiKey ? (
+                <button
+                  type="button"
+                  className="text-xs text-[var(--dl-muted)] underline hover:text-[var(--dl-fg)]"
+                  onClick={() => void saveSettings({ clearApiKey: true, scope: 'account' })}
+                  disabled={settingsSaving}
+                >
+                  Remove my account key
+                </button>
+              ) : null}
               {settings?.hasCustomApiKey ? (
                 <div>
                   <button
                     type="button"
                     className="text-xs text-[var(--dl-muted)] underline hover:text-[var(--dl-fg)]"
-                    onClick={() => void saveSettings({ clearApiKey: true })}
+                    onClick={() => void saveSettings({ clearApiKey: true, scope: 'project' })}
                     disabled={settingsSaving}
                   >
-                    Remove custom key (use server default)
+                    Remove existing project key
                   </button>
                 </div>
               ) : null}

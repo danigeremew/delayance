@@ -1,8 +1,11 @@
 import {
+  BadRequestException,
   Body,
+  Delete,
   Controller,
   Get,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Query,
@@ -56,13 +59,16 @@ export class DocumentsController {
   @Post('office-import')
   @RequireProjectRoles('contributor')
   @ApiConsumes('multipart/form-data')
-  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: 100 * 1024 * 1024 } }))
+  @UseInterceptors(
+    FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: 100 * 1024 * 1024 } }),
+  )
   importOfficeFile(
     @Param('projectId') projectId: string,
     @Req() req: { user: ProjectRequestUser },
     @UploadedFile() file?: Express.Multer.File,
   ) {
-    if (!file) throw new Error('file required');
+    if (!file) throw new BadRequestException('A DOCX file is required');
+    if (!/\.docx$/i.test(file.originalname)) throw new BadRequestException('Choose a DOCX file');
     const title = file.originalname.replace(/\.docx$/i, '') || 'Imported document';
     return this.documents.importOfficeFile(projectId, req.user.userId, req.user.projectRole!, {
       title,
@@ -92,6 +98,16 @@ export class DocumentsController {
       req.user.projectRole!,
       body,
     );
+  }
+
+  @Delete(':documentId')
+  @RequireProjectRoles('editor')
+  remove(
+    @Param('projectId') projectId: string,
+    @Param('documentId', new ParseUUIDPipe()) documentId: string,
+    @Req() req: { user: ProjectRequestUser },
+  ) {
+    return this.documents.remove(projectId, documentId, req.user.userId, req.user.projectRole!);
   }
 
   @Patch(':documentId/content')
@@ -181,10 +197,7 @@ export class DocumentsController {
 
   @Get(':documentId/comments')
   @RequireProjectRoles('viewer')
-  listComments(
-    @Param('projectId') projectId: string,
-    @Param('documentId') documentId: string,
-  ) {
+  listComments(@Param('projectId') projectId: string, @Param('documentId') documentId: string) {
     return this.documents.listComments(projectId, documentId);
   }
 
@@ -214,20 +227,12 @@ export class DocumentsController {
     @Param('commentId') commentId: string,
     @Req() req: { user: ProjectRequestUser },
   ) {
-    return this.documents.resolveComment(
-      projectId,
-      documentId,
-      commentId,
-      req.user.projectRole!,
-    );
+    return this.documents.resolveComment(projectId, documentId, commentId, req.user.projectRole!);
   }
 
   @Get(':documentId/assignments')
   @RequireProjectRoles('viewer')
-  listAssignments(
-    @Param('projectId') projectId: string,
-    @Param('documentId') documentId: string,
-  ) {
+  listAssignments(@Param('projectId') projectId: string, @Param('documentId') documentId: string) {
     return this.documents.listAssignments(projectId, documentId);
   }
 
@@ -241,13 +246,7 @@ export class DocumentsController {
     body: {
       sectionId: string;
       assigneeId?: string | null;
-      status:
-        | 'not_started'
-        | 'notes'
-        | 'draft'
-        | 'needs_review'
-        | 'approved'
-        | 'locked';
+      status: 'not_started' | 'notes' | 'draft' | 'needs_review' | 'approved' | 'locked';
     },
   ) {
     return this.documents.upsertAssignment(
@@ -267,12 +266,7 @@ export class DocumentsController {
     @Param('sectionId') sectionId: string,
     @Req() req: { user: ProjectRequestUser },
   ) {
-    return this.documents.exportSectionDocx(
-      projectId,
-      documentId,
-      sectionId,
-      req.user.userId,
-    );
+    return this.documents.exportSectionDocx(projectId, documentId, sectionId, req.user.userId);
   }
 
   @Post(':documentId/sections/:sectionId/import-docx')

@@ -43,9 +43,13 @@ Protected routes return HTTP 401 when a bearer token is missing so the web clien
 
 Editable documents are DOCX files in isolated, content-addressed local file storage. Wordcraft is the sole browser editor and owns editing, formatting, pagination and DOCX import/export; PostgreSQL keeps metadata and Delayance's extracted analysis representation.
 
-The shared workspace places Wordcraft’s native ribbon and status bar across the app beneath Delayance’s header. The embedded Rust layout reserves host sidebar widths; validated geometry and overlay messages clip the iframe so React panels remain interactive and native menus/dialogs appear above them. Header history and command search dispatch through the existing narrow command bridge.
+The shared workspace lives in a persistent Next.js layout under the project documents route. Switching documents retains the project header, document list, and sidebar containers; only document-specific editor and intelligence sessions restart. Editor loading stays within the center region, retaining the last sidebar geometry. Sidebar navigation saves pending edits through WOPI before leaving; failed saves keep the current document open. Each editor state is scoped to its document so old callbacks cannot control the next document. The shared workspace places Wordcraft’s native ribbon and status bar across the app beneath Delayance’s header. The embedded Rust layout reserves host sidebar widths; validated geometry and overlay messages clip the iframe so React panels remain interactive and native menus/dialogs appear above them. Header history and command search dispatch through the existing narrow command bridge.
 
 Its host bridge uses authorized WOPI sessions, locks, immutable DOCX storage, version creation, analysis, and AI acceptance. Native range handles include the document revision and selection positions. No database document model or direct provider writes are added. See [Wordcraft integration](../integrations/wordcraft/README.md) for build steps and limitations. PostgreSQL runs as a local service; Compose starts only Redis.
+
+### AI credentials
+
+Gemini account keys are encrypted in PostgreSQL on the user record and resolved using the authenticated requesting user ID for settings, connection tests, intent classification, and AI generation. Account keys take precedence over existing project keys and the server default. Project authorization and local-only policy checks still apply; another project member never inherits a user's account key. Model and policy remain project settings. The browser receives key-presence flags only.
 
 ### AI safety
 

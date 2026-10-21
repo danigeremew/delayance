@@ -133,6 +133,7 @@ export const aiSettingsSchema = z
     model: geminiModelSchema.optional(),
     policy: z.enum(['any', 'local_only']).optional(),
     apiKey: z.string().trim().min(1).nullable().optional(),
+    apiKeyScope: z.enum(['project', 'account']).optional(),
   })
   .strict();
 

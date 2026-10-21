@@ -39,8 +39,8 @@ export class ProjectsController {
   @Get(':projectId')
   @UseGuards(ProjectRoleGuard)
   @RequireProjectRoles('viewer')
-  get(@Param('projectId') projectId: string) {
-    return this.projects.get(projectId);
+  async get(@Param('projectId') projectId: string, @Req() req: { user: ProjectRequestUser }) {
+    return { ...(await this.projects.get(projectId)), role: req.user.projectRole! };
   }
 
   @Patch(':projectId')

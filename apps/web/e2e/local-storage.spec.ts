@@ -89,7 +89,9 @@ test('local files support document creation, worker exports, signed downloads, a
   }
 });
 
-test('reloading a real project document releases its WOPI lock', async ({ page }) => {
+test('renames a project inline with the real editor and releases its WOPI lock on reload', async ({
+  page,
+}, testInfo) => {
   page.on('dialog', (dialog) => void dialog.accept());
   let projectId: string | undefined;
   let headers: { Authorization: string } | undefined;
@@ -124,6 +126,31 @@ test('reloading a real project document releases its WOPI lock', async ({ page }
     await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeEnabled({
       timeout: 90000,
     });
+    await page.getByRole('button', { name: 'Editor reload fixture', exact: true }).click();
+    const nameInput = page.getByRole('textbox', { name: 'Project name', exact: true });
+    await expect(nameInput).toBeVisible();
+    await expect(nameInput).toBeFocused();
+    await expect(nameInput).toHaveCSS('border-top-style', 'solid');
+    await expect(nameInput).toHaveCSS('border-left-width', '1px');
+    await expect(nameInput).toHaveCSS('border-radius', '0px');
+    await nameInput.fill('Renamed with Enter');
+    await page.screenshot({ path: testInfo.outputPath('project-name-input.png') });
+    await nameInput.press('Enter');
+    await expect(nameInput).toHaveCount(0);
+    await page.getByRole('button', { name: 'Renamed with Enter', exact: true }).click();
+    await nameInput.fill('Renamed by clicking elsewhere');
+    // A real document canvas takes focus in a different browsing context.
+    await page
+      .frameLocator('iframe[title="Wordcraft"]')
+      .locator('canvas')
+      .click({ position: { x: 500, y: 250 } });
+    await expect(nameInput).toHaveCount(0);
+    await expect(
+      page.getByRole('heading', { name: 'Renamed by clicking elsewhere', exact: true }),
+    ).toBeVisible();
+    const savedProject = await page.request.get(`${API}/projects/${projectId}`, { headers });
+    expect(await savedProject.json()).toMatchObject({ name: 'Renamed by clicking elsewhere' });
+    await page.screenshot({ path: testInfo.outputPath('project-name-saved.png') });
     // A fresh page uses a new random lock. Becoming writable proves the server
     // received the old page's release; unload beacons need not expose a response event.
     await page.reload({ timeout: 30000 });
@@ -131,6 +158,9 @@ test('reloading a real project document releases its WOPI lock', async ({ page }
       timeout: 90000,
     });
     await expect(page.getByText(/Showing the last saved copy read-only/)).toHaveCount(0);
+    await expect(
+      page.getByRole('heading', { name: 'Renamed by clicking elsewhere', exact: true }),
+    ).toBeVisible();
   } finally {
     if (!page.isClosed()) await page.close();
     if (projectId && headers)

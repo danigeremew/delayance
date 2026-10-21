@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { and, asc, desc, eq, isNull } from 'drizzle-orm';
+import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm';
 import { applyOperation } from '@delayance/document-engine';
 import {
   buildIntentClassificationMessages,
@@ -33,6 +33,7 @@ import {
   projectAiSettings,
   projectMemoryItems,
   projectSources,
+  users,
 } from '../database/schema';
 import { DocumentsService } from '../documents/documents.service';
 import { canEditContent, roleAtLeast } from '../rbac/roles';
@@ -54,32 +55,53 @@ export class AiService {
     private readonly documents: DocumentsService,
   ) {}
 
-  async getSettings(projectId: string) {
+  private async accountKey(userId?: string) {
+    if (!userId) return null;
+    const user = await this.database.db.query.users.findFirst({
+      where: eq(users.id, userId),
+      columns: { encryptedGeminiApiKey: true },
+    });
+    return user?.encryptedGeminiApiKey ?? null;
+  }
+
+  async getSettings(projectId: string, userId?: string) {
     const row = await this.database.db.query.projectAiSettings.findFirst({
       where: eq(projectAiSettings.projectId, projectId),
     });
     const gemini = row?.provider === 'gemini' ? row : undefined;
+    const accountKey = await this.accountKey(userId);
     return {
       projectId,
       policy: row?.policy ?? 'any',
       provider: 'gemini',
       model: gemini?.model ?? this.config.env.GEMINI_MODEL,
       baseUrl: null,
-      hasApiKey: Boolean(gemini?.encryptedApiKey || this.config.env.GEMINI_API_KEY),
+      hasApiKey: Boolean(accountKey || gemini?.encryptedApiKey || this.config.env.GEMINI_API_KEY),
+      hasAccountApiKey: Boolean(accountKey),
+      keySource: accountKey
+        ? 'account'
+        : gemini?.encryptedApiKey
+          ? 'project'
+          : this.config.env.GEMINI_API_KEY
+            ? 'server'
+            : null,
       hasCustomApiKey: Boolean(gemini?.encryptedApiKey),
     };
   }
 
-  async putSettings(projectId: string, input: unknown) {
+  async putSettings(projectId: string, input: unknown, userId?: string) {
     const parsed = aiSettingsSchema.safeParse(input);
     if (!parsed.success) throw new BadRequestException('Invalid Gemini settings');
     const settings = parsed.data;
+    if (settings.apiKeyScope === 'account' && !userId)
+      throw new BadRequestException('An authenticated account is required to save an account key');
+    const accountScope = settings.apiKeyScope === 'account';
     const existing = await this.database.db.query.projectAiSettings.findFirst({
       where: eq(projectAiSettings.projectId, projectId),
     });
     const gemini = existing?.provider === 'gemini' ? existing : undefined;
     const encryptedApiKey =
-      settings.apiKey === undefined
+      accountScope || settings.apiKey === undefined
         ? (gemini?.encryptedApiKey ?? null)
         : settings.apiKey
           ? encryptSecret(settings.apiKey, this.config.env.SECRETS_ENCRYPTION_KEY)
@@ -93,14 +115,35 @@ export class AiService {
       encryptedApiKey,
       updatedAt: new Date(),
     };
-    await this.database.db.insert(projectAiSettings).values(values).onConflictDoUpdate({
-      target: projectAiSettings.projectId,
-      set: values,
-    });
-    return this.getSettings(projectId);
+    await this.database.db
+      .insert(projectAiSettings)
+      .values(values)
+      .onConflictDoUpdate({
+        target: projectAiSettings.projectId,
+        set: {
+          ...values,
+          // Preserve the current database value when a request only changes model/policy.
+          encryptedApiKey:
+            accountScope || settings.apiKey === undefined
+              ? sql`case when ${projectAiSettings.provider} = 'gemini' then ${projectAiSettings.encryptedApiKey} else null end`
+              : encryptedApiKey,
+        },
+      });
+    if (accountScope && settings.apiKey !== undefined) {
+      await this.database.db
+        .update(users)
+        .set({
+          encryptedGeminiApiKey: settings.apiKey
+            ? encryptSecret(settings.apiKey, this.config.env.SECRETS_ENCRYPTION_KEY)
+            : null,
+          updatedAt: new Date(),
+        })
+        .where(eq(users.id, userId!));
+    }
+    return this.getSettings(projectId, userId);
   }
 
-  async resolveProvider(projectId: string) {
+  async resolveProvider(projectId: string, userId?: string) {
     const settings = await this.database.db.query.projectAiSettings.findFirst({
       where: eq(projectAiSettings.projectId, projectId),
     });
@@ -110,8 +153,9 @@ export class AiService {
       );
     }
     const gemini = settings?.provider === 'gemini' ? settings : undefined;
-    const apiKey = gemini?.encryptedApiKey
-      ? decryptSecret(gemini.encryptedApiKey, this.config.env.SECRETS_ENCRYPTION_KEY)
+    const encryptedKey = (await this.accountKey(userId)) || gemini?.encryptedApiKey;
+    const apiKey = encryptedKey
+      ? decryptSecret(encryptedKey, this.config.env.SECRETS_ENCRYPTION_KEY)
       : this.config.env.GEMINI_API_KEY;
     if (!apiKey) {
       throw new BadRequestException(
@@ -275,7 +319,7 @@ export class AiService {
         confidence: 'high',
       };
     } else {
-      classification = await this.resolveIntent(input.projectId, input.instruction);
+      classification = await this.resolveIntent(input.projectId, input.instruction, input.userId);
     }
 
     if (classification.needsClarification || !classification.mode) {
@@ -342,13 +386,17 @@ export class AiService {
     }
   }
 
-  async resolveIntent(projectId: string, instruction: string): Promise<IntentClassification> {
+  async resolveIntent(
+    projectId: string,
+    instruction: string,
+    userId?: string,
+  ): Promise<IntentClassification> {
     const heuristic = classifyAiIntent(instruction);
     if (heuristic.needsClarification) return heuristic;
     if (heuristic.confidence === 'high') return heuristic;
 
     try {
-      const { adapter, model } = await this.resolveProvider(projectId);
+      const { adapter, model } = await this.resolveProvider(projectId, userId);
       const messages = buildIntentClassificationMessages(instruction);
       const raw = await adapter.completeStructured(messages, {
         model,
@@ -388,7 +436,10 @@ export class AiService {
       chatId: input.chatId,
       instruction: input.instruction,
     });
-    const { adapter, model, provider, external } = await this.resolveProvider(input.projectId);
+    const { adapter, model, provider, external } = await this.resolveProvider(
+      input.projectId,
+      input.userId,
+    );
 
     const memories = await this.database.db
       .select()
@@ -604,7 +655,11 @@ export class AiService {
 
       if (input.mode === 'auto' && !input.preferredMode) {
         yield { type: 'status', message: 'Choosing mode…' };
-        const classification = await this.resolveIntent(input.projectId, input.instruction);
+        const classification = await this.resolveIntent(
+          input.projectId,
+          input.instruction,
+          input.userId,
+        );
         if (classification.needsClarification || !classification.mode) {
           const [proposal] = await this.database.db
             .insert(aiProposals)
@@ -691,7 +746,10 @@ export class AiService {
       if (docRow.fileKey)
         throw new BadRequestException('Use the office AI endpoint for this document.');
       const content = asDocument(docRow.content);
-      const { adapter, model, provider, external } = await this.resolveProvider(input.projectId);
+      const { adapter, model, provider, external } = await this.resolveProvider(
+        input.projectId,
+        input.userId,
+      );
 
       if (!adapter.stream) {
         // Provider cannot stream — fall back to complete write.

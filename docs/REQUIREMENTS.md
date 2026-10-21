@@ -716,7 +716,7 @@ The application must:
 
 ## 17. AI provider support
 
-Gemini is the only AI provider for now. The API server supplies the Gemini key and default model, so creating a project requires no AI setup.
+Gemini is the only AI provider for now. The API server supplies the default model and may supply a default Gemini key, so creating a project requires no AI setup. Users can save an encrypted account API key once and use it across their projects; existing project keys remain a fallback. Keys are never returned to the browser.
 
 The assistant may offer Gemini model choices. The application must clearly show when document content is sent to Google. Existing local-only project policies must prevent external AI requests until an editor explicitly changes the policy.
 

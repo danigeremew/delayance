@@ -3,6 +3,9 @@
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
+import { BrandLogo } from '@/components/brand-logo';
+import { ProjectName } from '@/components/project-name';
+import { DocumentsList } from '@/components/document-list';
 
 interface DocRow {
   id: string;
@@ -14,6 +17,7 @@ export default function ProjectWorkspaceRedirectPage() {
   const router = useRouter();
   const projectId = params.projectId;
   const [error, setError] = useState<string | null>(null);
+  const [docs, setDocs] = useState<DocRow[] | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -25,13 +29,7 @@ export default function ProjectWorkspaceRedirectPage() {
         if (docs && docs.length > 0) {
           router.replace(`/projects/${projectId}/documents/${docs[0]!.id}`);
         } else {
-          // Create initial default document if project has no documents yet
-          const newDoc = await apiFetch<{ id: string }>(`/projects/${projectId}/documents`, {
-            method: 'POST',
-            body: JSON.stringify({ title: 'Untitled document' }),
-          });
-          if (!isMounted) return;
-          router.replace(`/projects/${projectId}/documents/${newDoc.id}`);
+          setDocs([]);
         }
       } catch (err) {
         if (isMounted) {
@@ -59,6 +57,32 @@ export default function ProjectWorkspaceRedirectPage() {
           Return to Projects
         </button>
       </main>
+    );
+  }
+
+  if (docs) {
+    return (
+      <div className="flex h-screen flex-col bg-[var(--dl-bg)]">
+        <header className="dl-app-topbar">
+          <div className="dl-app-topbar-main">
+            <BrandLogo href="/projects" className="dl-app-brand" showName={false} />
+            <ProjectName key={projectId} projectId={projectId} />
+          </div>
+        </header>
+        <div className="flex min-h-0 flex-1">
+          <aside className="dl-empty-project-documents" aria-label="Documents">
+            <div className="dl-tools-panel-header">
+              <h2 className="dl-tools-panel-title">Documents</h2>
+            </div>
+            <div className="dl-tools-panel-body">
+              <DocumentsList projectId={projectId} docs={docs} onDocumentsChange={setDocs} />
+            </div>
+          </aside>
+          <main className="flex flex-1 items-center justify-center p-6 text-center text-[var(--dl-muted)]">
+            <p>Create or import a document to start writing.</p>
+          </main>
+        </div>
+      </div>
     );
   }
 

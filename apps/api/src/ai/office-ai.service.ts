@@ -44,7 +44,7 @@ export class OfficeAiService {
       request.mode === 'auto'
         ? request.preferredMode
           ? { mode: request.preferredMode, needsClarification: false }
-          : await this.ai.resolveIntent(projectId, request.instruction)
+          : await this.ai.resolveIntent(projectId, request.instruction, userId)
         : { mode: request.mode, needsClarification: false };
     const mode = classification.mode;
     if (mode === 'review' && !roleAtLeast(role, 'reviewer'))
@@ -88,7 +88,7 @@ export class OfficeAiService {
         externalProviderWarning: null,
       };
     }
-    const { adapter, model } = await this.ai.resolveProvider(projectId);
+    const { adapter, model } = await this.ai.resolveProvider(projectId, userId);
     const snapshot = await this.office.download(projectId, documentId);
     const { file } = snapshot;
     const analysis = await extractDocumentAnalysis(file);

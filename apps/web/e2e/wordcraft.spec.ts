@@ -79,6 +79,12 @@ async function fixture(
       route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(value) });
     if (pathname === '/auth/refresh') return json({ accessToken: 'test-token', user });
     if (pathname === '/auth/me') return json(user);
+    if (pathname === `/projects/${projectId}`)
+      return json({
+        id: projectId,
+        name: 'Wordcraft project',
+        role: permission === 'write' ? 'owner' : 'viewer',
+      });
     if (pathname.endsWith('/office/ai')) {
       const input = request.postDataJSON() as { selectedText: string; instruction: string };
       expect(input.selectedText).toBe('Original text');
@@ -292,6 +298,10 @@ test('real Wordcraft rejects stale ranges, preserves bold text in DOCX, saves th
       })
     ).ok,
   ).toBe(true);
+  await expect(page.locator('.dl-app-brand img')).toBeVisible();
+  await expect(page.locator('.dl-app-brand')).toHaveText('');
+  await expect(page.locator('.dl-app-topbar-back, .dl-doc-icon')).toHaveCount(0);
+  await expect(page.locator('.dl-app-topbar-status')).toHaveCount(0);
   await page.getByRole('button', { name: 'Save', exact: true }).click();
   await expect.poll(data.saves).toBe(1);
   await expect(page.locator('.dl-app-topbar-status')).toHaveText('saved');
@@ -300,7 +310,7 @@ test('real Wordcraft rejects stale ranges, preserves bold text in DOCX, saves th
   expect(xml).toContain('Wordcraft replacement');
   expect(xml).toMatch(/<w:b(?:\s|\/|>)/);
   await expect(page.getByLabel('Document editor')).toHaveCount(0);
-  await page.getByTitle('Back to projects').click();
+  await page.getByRole('link', { name: 'Delayance', exact: true }).click();
   await expect.poll(data.lock).toBe(null);
 });
 

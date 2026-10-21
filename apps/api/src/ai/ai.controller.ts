@@ -66,8 +66,11 @@ export class AiController {
 
   @Post('projects/:projectId/ai-settings/test')
   @RequireProjectRoles('editor')
-  async testSettings(@Param('projectId') projectId: string) {
-    const { adapter, model } = await this.ai.resolveProvider(projectId);
+  async testSettings(
+    @Param('projectId') projectId: string,
+    @Req() req: { user: ProjectRequestUser },
+  ) {
+    const { adapter, model } = await this.ai.resolveProvider(projectId, req.user.userId);
     try {
       await adapter.complete([{ role: 'user', content: 'Reply OK.' }], { model });
       return { ok: true, model };
@@ -128,8 +131,8 @@ export class AiController {
 
   @Get('projects/:projectId/ai-settings')
   @RequireProjectRoles('viewer')
-  getSettings(@Param('projectId') projectId: string) {
-    return this.ai.getSettings(projectId);
+  getSettings(@Param('projectId') projectId: string, @Req() req: { user: ProjectRequestUser }) {
+    return this.ai.getSettings(projectId, req.user.userId);
   }
 
   @Put('projects/:projectId/ai-settings')
@@ -137,8 +140,9 @@ export class AiController {
   putSettings(
     @Param('projectId') projectId: string,
     @Body(new ZodValidationPipe(aiSettingsSchema)) body: z.infer<typeof aiSettingsSchema>,
+    @Req() req: { user: ProjectRequestUser },
   ) {
-    return this.ai.putSettings(projectId, body);
+    return this.ai.putSettings(projectId, body, req.user.userId);
   }
 
   @Get('projects/:projectId/documents/:documentId/ai/chats')

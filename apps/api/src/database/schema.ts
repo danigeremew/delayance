@@ -55,6 +55,7 @@ export const users = pgTable(
     email: text('email').notNull().unique(),
     name: text('name').notNull(),
     passwordHash: text('password_hash'),
+    encryptedGeminiApiKey: text('encrypted_gemini_api_key'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },

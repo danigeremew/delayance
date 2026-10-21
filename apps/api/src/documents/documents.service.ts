@@ -21,10 +21,17 @@ import {
   type Document,
   type SectionNode,
 } from '@delayance/document-model';
-import { documentToPlainText, exportDocx, importDocx } from '@delayance/docx-engine';
+import {
+  documentToPlainText,
+  exportDocx,
+  importDocx,
+  extractDocumentAnalysis,
+} from '@delayance/docx-engine';
 import type { ProjectRole } from '@delayance/shared-types';
 import { DatabaseService } from '../database/database.service';
+import { createDocumentSchema } from '../common/dto';
 import {
+  auditEvents,
   comments,
   documentTemplates,
   documentVersions,
@@ -32,7 +39,7 @@ import {
   sectionAssignments,
 } from '../database/schema';
 import { AuditService } from '../rbac/audit.service';
-import { canComment, canEditContent } from '../rbac/roles';
+import { canComment, canEditContent, canManageProject } from '../rbac/roles';
 import { StorageService } from '../storage/storage.service';
 import { TemplatesService } from '../templates/templates.service';
 import { DOCUMENT_EXTRACT_QUEUE, JobsService } from '../jobs/jobs.service';
@@ -75,11 +82,11 @@ export class DocumentsService {
     return doc;
   }
 
-  async create(
-    projectId: string,
-    userId: string,
-    input: { title: string; templateId?: string },
-  ) {
+  async create(projectId: string, userId: string, input: { title: string; templateId?: string }) {
+    const parsed = createDocumentSchema.safeParse(input);
+    if (!parsed.success)
+      throw new BadRequestException('Enter a document name of 1 to 500 characters');
+    input = parsed.data;
     const template = input.templateId
       ? await this.database.db.query.documentTemplates.findFirst({
           where: eq(documentTemplates.id, input.templateId),
@@ -170,8 +177,9 @@ export class DocumentsService {
         ...(input.status !== undefined ? { status: input.status } : {}),
         updatedAt: new Date(),
       })
-      .where(eq(documents.id, documentId))
+      .where(and(eq(documents.id, documentId), eq(documents.projectId, projectId)))
       .returning();
+    if (!row) throw new NotFoundException('Document not found');
     await this.audit.record({
       actorId: userId,
       action: 'document.meta_updated',
@@ -179,6 +187,26 @@ export class DocumentsService {
       entityId: documentId,
     });
     return row;
+  }
+
+  async remove(projectId: string, documentId: string, userId: string, role: ProjectRole) {
+    if (!canManageProject(role))
+      throw new ForbiddenException('Editor role required to delete documents');
+    return this.database.db.transaction(async (tx) => {
+      const [deleted] = await tx
+        .delete(documents)
+        .where(and(eq(documents.id, documentId), eq(documents.projectId, projectId)))
+        .returning({ id: documents.id });
+      if (!deleted) throw new NotFoundException('Document not found');
+      await tx.insert(auditEvents).values({
+        actorId: userId,
+        action: 'document.deleted',
+        entityType: 'document',
+        entityId: documentId,
+        metadata: { projectId },
+      });
+      return deleted;
+    });
   }
 
   async patchContent(
@@ -246,6 +274,13 @@ export class DocumentsService {
     input: { title: string; buffer: Buffer },
   ) {
     if (!canEditContent(role)) throw new ForbiddenException('Cannot import document');
+    if (input.buffer.length === 0 || input.buffer.length > 100 * 1024 * 1024)
+      throw new BadRequestException('Invalid DOCX file size');
+    try {
+      await extractDocumentAnalysis(input.buffer);
+    } catch {
+      throw new BadRequestException('This file is not a readable DOCX document');
+    }
     const created = await this.create(projectId, userId, { title: input.title });
     return this.replaceOfficeFile(projectId, created.id, userId, role, input.buffer, 'docx.import');
   }
@@ -378,10 +413,7 @@ export class DocumentsService {
   async getVersion(projectId: string, documentId: string, versionId: string) {
     await this.get(projectId, documentId);
     const version = await this.database.db.query.documentVersions.findFirst({
-      where: and(
-        eq(documentVersions.id, versionId),
-        eq(documentVersions.documentId, documentId),
-      ),
+      where: and(eq(documentVersions.id, versionId), eq(documentVersions.documentId, documentId)),
     });
     if (!version) throw new NotFoundException('Version not found');
     return version;
@@ -480,13 +512,7 @@ export class DocumentsService {
     input: {
       sectionId: string;
       assigneeId?: string | null;
-      status:
-        | 'not_started'
-        | 'notes'
-        | 'draft'
-        | 'needs_review'
-        | 'approved'
-        | 'locked';
+      status: 'not_started' | 'notes' | 'draft' | 'needs_review' | 'approved' | 'locked';
     },
   ) {
     if (!canEditContent(role)) throw new ForbiddenException('Cannot assign sections');
@@ -570,8 +596,7 @@ export class DocumentsService {
       userId,
       keyPrefix: `projects/${projectId}/section-exports`,
       filename: `section-${sectionId}.docx`,
-      contentType:
-        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       body: exported.buffer,
     });
     const url = await this.storage.getSignedDownloadUrl(stored.objectKey);
@@ -597,8 +622,7 @@ export class DocumentsService {
 
     const imported = await importDocx(buffer, { mode: 'normalize' });
     const incoming = imported.document.children.find((c) => c.type === 'section') as
-      | SectionNode
-      | undefined;
+      SectionNode | undefined;
     const replacement: SectionNode = incoming
       ? { ...incoming, id: sectionId, locked: existing.locked }
       : {
@@ -657,13 +681,9 @@ export class DocumentsService {
   }
 
   private isInLockedSection(doc: Document, nodeId: string): boolean {
-    const walk = (
-      nodes: Document['children'],
-      lockedAncestor: boolean,
-    ): boolean => {
+    const walk = (nodes: Document['children'], lockedAncestor: boolean): boolean => {
       for (const node of nodes) {
-        const locked =
-          lockedAncestor || (node.type === 'section' && Boolean(node.locked));
+        const locked = lockedAncestor || (node.type === 'section' && Boolean(node.locked));
         if (node.id === nodeId) return locked;
         if (node.type === 'section' || node.type === 'appendix') {
           if (walk(node.children, locked)) return true;

@@ -8,7 +8,7 @@ export const createProjectSchema = z
   .strict();
 
 export const updateProjectSchema = z.object({
-  name: z.string().min(1).max(200).optional(),
+  name: z.string().trim().min(1).max(200).optional(),
   description: z.string().max(5000).optional(),
 });
 
@@ -34,12 +34,12 @@ export const updateMemorySchema = z.object({
 });
 
 export const createDocumentSchema = z.object({
-  title: z.string().min(1).max(500),
+  title: z.string().trim().min(1).max(500),
   templateId: z.string().uuid().optional(),
 });
 
 export const updateDocumentMetaSchema = z.object({
-  title: z.string().min(1).max(500).optional(),
+  title: z.string().trim().min(1).max(500).optional(),
   status: z.enum(['draft', 'in_review', 'approved']).optional(),
 });
 

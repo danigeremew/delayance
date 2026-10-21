@@ -12,8 +12,19 @@ const user = {
 };
 const workspace = `/projects/${projectId}/documents/${documentId}`;
 
-async function setup(page: Page, options: { failSaveOnce?: boolean; denyAccept?: boolean } = {}) {
+async function setup(
+  page: Page,
+  options: {
+    failSaveOnce?: boolean;
+    denyAccept?: boolean;
+    projectRole?: 'owner' | 'viewer';
+    failRenameOnce?: boolean;
+  } = {},
+) {
   let failSave = options.failSaveOnce ?? false;
+  let projectName = 'Project brief';
+  let failRename = options.failRenameOnce ?? false;
+  const renames: { name: string }[] = [];
   let saves = 0;
   let authorizations = 0;
   const proposals: Record<string, unknown>[] = [];
@@ -25,6 +36,7 @@ async function setup(page: Page, options: { failSaveOnce?: boolean; denyAccept?:
     policy: 'any',
     hasApiKey: false,
     hasCustomApiKey: false,
+    hasAccountApiKey: false,
   };
   await page.route('**/wordcraft/index.html*', (route) =>
     route.fulfill({
@@ -91,6 +103,18 @@ async function setup(page: Page, options: { failSaveOnce?: boolean; denyAccept?:
       route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(value) });
     if (path === '/auth/refresh') return json({ accessToken: 'test-token', user });
     if (path === '/auth/me') return json(user);
+    if (path === `/projects/${projectId}`) {
+      if (method === 'PATCH') {
+        const input = route.request().postDataJSON() as { name: string };
+        renames.push(input);
+        if (failRename) {
+          failRename = false;
+          return json({ message: 'Could not save project name.' }, 500);
+        }
+        projectName = input.name;
+      }
+      return json({ id: projectId, name: projectName, role: options.projectRole ?? 'owner' });
+    }
     if (path.endsWith('/ai-settings/test'))
       return settings.hasApiKey
         ? json({ ok: true, model: settings.model })
@@ -101,8 +125,15 @@ async function setup(page: Page, options: { failSaveOnce?: boolean; denyAccept?:
         settings = {
           ...settings,
           model: input.model ?? settings.model,
-          hasApiKey: Boolean(input.apiKey || settings.hasApiKey),
-          hasCustomApiKey: Boolean(input.apiKey || settings.hasCustomApiKey),
+          hasApiKey: input.apiKey === null ? false : Boolean(input.apiKey || settings.hasApiKey),
+          hasAccountApiKey:
+            input.apiKeyScope === 'account' && input.apiKey !== undefined
+              ? Boolean(input.apiKey)
+              : settings.hasAccountApiKey,
+          hasCustomApiKey:
+            input.apiKeyScope !== 'account' && input.apiKey !== undefined
+              ? Boolean(input.apiKey)
+              : settings.hasCustomApiKey,
         };
       }
       return json(settings);
@@ -209,6 +240,7 @@ async function setup(page: Page, options: { failSaveOnce?: boolean; denyAccept?:
   await expect(page.getByRole('button', { name: 'AI settings', exact: true })).toBeVisible();
   return {
     requests,
+    renames,
     saves: () => saves,
     authorizations: () => authorizations,
     office: page
@@ -225,9 +257,67 @@ async function chooseMode(page: Page, label: string) {
     .click();
 }
 
+test('renames the project inline with Enter or blur, cancels with Escape, and persists on reload', async ({
+  page,
+}, testInfo) => {
+  const { renames } = await setup(page);
+  await expect(page.getByRole('heading', { name: 'Project brief', exact: true })).toBeVisible();
+  await page.getByTitle('Rename project', { exact: true }).click();
+  const input = page.getByRole('textbox', { name: 'Project name', exact: true });
+  await expect(input).toBeFocused();
+  await input.fill('  Renamed project  ');
+  await input.press('Enter');
+  await expect(page.getByRole('heading', { name: 'Renamed project', exact: true })).toBeVisible();
+  expect(renames).toEqual([{ name: 'Renamed project' }]);
+  await page.getByTitle('Rename project', { exact: true }).click();
+  await input.fill('Discard this name');
+  await input.press('Escape');
+  await expect(page.getByRole('heading', { name: 'Renamed project', exact: true })).toBeVisible();
+  expect(renames).toHaveLength(1);
+  await page.getByTitle('Rename project', { exact: true }).click();
+  await input.fill('   ');
+  await input.press('Enter');
+  await expect(page.getByRole('alert').filter({ hasText: 'Enter a project name.' })).toBeVisible();
+  expect(renames).toHaveLength(1);
+  await input.fill('Final project name');
+  await page.getByRole('button', { name: 'AI settings', exact: true }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Final project name', exact: true }),
+  ).toBeVisible();
+  expect(renames).toHaveLength(2);
+  await page.reload();
+  await expect(
+    page.getByRole('heading', { name: 'Final project name', exact: true }),
+  ).toBeVisible();
+  await page.getByTitle('Rename project', { exact: true }).click();
+  await page.screenshot({ path: testInfo.outputPath('inline-project-name.png') });
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+});
+
+test('keeps the project name draft after a failed save and allows retrying', async ({ page }) => {
+  const { renames } = await setup(page, { failRenameOnce: true });
+  await page.getByTitle('Rename project', { exact: true }).click();
+  const input = page.getByRole('textbox', { name: 'Project name', exact: true });
+  await input.fill('Retry project');
+  await input.press('Enter');
+  await expect(
+    page.getByRole('alert').filter({ hasText: 'Could not save project name.' }),
+  ).toBeVisible();
+  await expect(input).toHaveValue('Retry project');
+  await input.press('Enter');
+  await expect(page.getByRole('heading', { name: 'Retry project', exact: true })).toBeVisible();
+  expect(renames).toHaveLength(2);
+});
+
+test('shows the project name without a rename control for viewers', async ({ page }) => {
+  await setup(page, { projectRole: 'viewer' });
+  await expect(page.getByRole('heading', { name: 'Project brief', exact: true })).toBeVisible();
+  await expect(page.getByTitle('Rename project', { exact: true })).toHaveCount(0);
+});
+
 test('saves a Gemini key, selects a current or custom model, and tests the saved connection', async ({
   page,
-}) => {
+}, testInfo) => {
   await setup(page);
   await page.getByRole('button', { name: 'AI settings', exact: true }).click();
   await page.getByRole('button', { name: 'Test saved connection' }).click();
@@ -235,24 +325,35 @@ test('saves a Gemini key, selects a current or custom model, and tests the saved
     page.getByText('Gemini is not configured. Configure a Gemini API key.', { exact: true }),
   ).toBeVisible();
   const keyInput = page.getByLabel('Gemini API Key', { exact: true });
-  await expect(keyInput).toHaveAttribute('type', 'password');
+  await expect(keyInput).toHaveAttribute('type', 'text');
+  await expect(keyInput).toHaveCSS('-webkit-text-security', 'disc');
   await keyInput.fill('synthetic-test-key');
   await page.getByRole('button', { name: 'Show API key', exact: true }).click();
   await expect(keyInput).toHaveAttribute('type', 'text');
   await expect(keyInput).toHaveValue('synthetic-test-key');
   await page.getByRole('button', { name: 'Hide API key', exact: true }).click();
-  await expect(keyInput).toHaveAttribute('type', 'password');
+  await expect(keyInput).toHaveAttribute('type', 'text');
+  await expect(keyInput).toHaveCSS('-webkit-text-security', 'disc');
   await page.getByLabel('Model', { exact: true }).selectOption('gemini-3.8-flash');
   await page.getByRole('button', { name: 'Save Settings', exact: true }).click();
-  await expect(page.getByText('Gemini API key and settings saved successfully.')).toBeVisible();
-  await page.getByRole('button', { name: 'Show API key', exact: true }).click();
-  await expect(keyInput).toHaveAttribute('type', 'text');
-  await expect(keyInput).toHaveValue('synthetic-test-key');
+  await expect(page.getByText('Gemini API key saved for all your projects.')).toBeVisible();
+  await expect(keyInput).toHaveValue('');
+  await expect(
+    page.getByText('Your account key is active across your projects (stored encrypted).'),
+  ).toBeVisible();
   await page.getByRole('button', { name: 'Test saved connection' }).click();
   await expect(page.getByText('Gemini connection works with gemini-3.8-flash.')).toBeVisible();
   await page.getByLabel('Custom model ID').fill('gemini-future-text');
   await page.getByRole('button', { name: 'Save Settings', exact: true }).click();
   await expect(page.getByLabel('Custom model ID')).toHaveValue('gemini-future-text');
+  await page.reload();
+  await page.getByRole('button', { name: 'AI settings', exact: true }).click();
+  await expect(
+    page.getByText('Your account key is active across your projects (stored encrypted).'),
+  ).toBeVisible();
+  await expect(keyInput).toHaveValue('');
+  await expect(page.getByLabel('Custom model ID')).toHaveValue('gemini-future-text');
+  await page.screenshot({ path: testInfo.outputPath('ai-account-key.png') });
 });
 
 test('Write and Edit preview text, apply only on acceptance, and save through the office bridge', async ({

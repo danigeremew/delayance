@@ -41,6 +41,12 @@ test('creates a project without AI setup', async ({ page }) => {
   });
   await page.route(`${API}/projects/00000000-0000-4000-8000-000000000002**`, (route) => {
     const path = new URL(route.request().url()).pathname;
+    if (path === '/projects/00000000-0000-4000-8000-000000000002') {
+      return route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ name: 'Gemini project', role: 'owner' }),
+      });
+    }
     if (path.endsWith('/office/session')) {
       return route.fulfill({
         status: 503,
@@ -71,8 +77,11 @@ test('creates a project without AI setup', async ({ page }) => {
   await page.getByRole('textbox', { name: 'Project name' }).fill('Gemini project');
   await page.getByRole('textbox', { name: 'Description (optional)' }).fill('A brief');
   await page.getByRole('button', { name: 'Create project' }).click();
+  await expect(page).toHaveURL(/\/projects\/00000000-0000-4000-8000-000000000002$/);
+  await expect(page.getByText('No documents in this project yet.')).toBeVisible();
+  await page.getByRole('button', { name: '+ New Doc', exact: true }).click();
   await expect(page).toHaveURL(
     /\/projects\/00000000-0000-4000-8000-000000000002\/documents\/00000000-0000-4000-8000-000000000003$/,
   );
-  await expect(page.getByRole('heading', { name: 'Untitled document', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Gemini project', exact: true })).toBeVisible();
 });

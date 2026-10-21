@@ -33,7 +33,9 @@ export function WordcraftEditor({
   onLayout,
   onError,
   onLockConflict,
+  loadingInsets,
 }: {
+  loadingInsets?: { top: number; bottom: number; left: number; right: number };
   leftWidth: number;
   rightWidth: number;
   onLayout: (layout: WordcraftLayout | null) => void;
@@ -387,6 +389,7 @@ export function WordcraftEditor({
       {error && !loaded ? (
         <div
           role="alert"
+          style={loadingInsets}
           className="pointer-events-auto absolute inset-0 z-30 border-b border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800"
         >
           {error}
@@ -395,6 +398,7 @@ export function WordcraftEditor({
       {!loaded && !error ? (
         <div
           role="status"
+          style={loadingInsets}
           className="pointer-events-auto absolute inset-0 z-30 flex items-center justify-center bg-[var(--dl-bg)] text-sm text-[var(--dl-muted)]"
         >
           Loading Wordcraft…
@@ -404,7 +408,10 @@ export function WordcraftEditor({
         ref={frame}
         title="Wordcraft"
         className="pointer-events-auto absolute inset-0 h-full w-full border-0"
-        style={{ clipPath: `url(#${clipId})`, visibility: error && !loaded ? 'hidden' : undefined }}
+        style={{
+          clipPath: `url(#${clipId})`,
+          visibility: !loaded || !layout ? 'hidden' : undefined,
+        }}
         allow="clipboard-read; clipboard-write"
       />
     </div>

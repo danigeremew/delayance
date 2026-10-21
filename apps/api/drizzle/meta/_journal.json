@@ -71,6 +71,13 @@
       "when": 1750000009000,
       "tag": "0009_session_one_day",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1750000010000,
+      "tag": "0010_account_gemini_key",
+      "breakpoints": true
     }
   ]
 }
