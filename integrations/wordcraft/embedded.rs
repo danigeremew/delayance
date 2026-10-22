@@ -163,7 +163,8 @@ pub fn stage_preview(app: &mut WordApp, id: String, text: String) -> Result<(), 
     provisional.run("review.restrict", &json!({"mode": "readOnly"})).map_err(|e| e.to_string())?;
     provisional.dirty = false;
     let original = std::mem::replace(&mut app.session, provisional);
-    app.embedded.as_mut().unwrap().preview = Some(Preview { id, text, original, start, end, decision: None });
+    let embedded = app.embedded.as_mut().ok_or("Embedded editor required")?;
+    embedded.preview = Some(Preview { id, text, original, start, end, decision: None });
     Ok(())
 }
 
@@ -175,7 +176,7 @@ pub fn resolve_preview(app: &mut WordApp, id: &str, accept: bool) -> Result<Valu
     }
     // Keep the provisional view available if the native operation is refused.
     let result = if accept { apply_text(&mut pending.original, &pending.text)? } else { json!({}) };
-    let pending = embedded.preview.take().unwrap();
+    let pending = embedded.preview.take().ok_or("No AI preview is open")?;
     app.session = pending.original;
     app.canvas.want_focus = true;
     app.canvas.scroll_to_caret = true;

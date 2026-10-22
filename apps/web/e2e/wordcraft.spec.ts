@@ -19,11 +19,29 @@ const user = {
   email: 'writer@example.test',
   name: 'Test Writer',
 };
-const built = existsSync(path.resolve('public/wordcraft/wordcraft_bg.wasm'));
+const candidateAssets = process.env.PLAYWRIGHT_WORDCRAFT_ASSETS_DIR || undefined;
+const built = existsSync(path.resolve(candidateAssets ?? 'public/wordcraft', 'wordcraft_bg.wasm'));
+if (candidateAssets && !built) {
+  throw new Error(`Build candidate assets before testing: ${candidateAssets}`);
+}
 
 test.use({
   viewport: { width: 1440, height: 900 },
   launchOptions: { args: ['--enable-unsafe-swiftshader'] },
+});
+
+test.beforeEach(async ({ page }) => {
+  // Exercise a staged upgrade without replacing the editor used by the running app.
+  if (candidateAssets) {
+    await page.route('**/wordcraft/*', async (route) => {
+      const name = new URL(route.request().url()).pathname.split('/').pop() ?? '';
+      if (!/^[a-zA-Z0-9_.-]+$/.test(name)) return route.abort();
+      await route.fulfill({
+        path: path.resolve(candidateAssets, name),
+        ...(name.endsWith('.wasm') ? { contentType: 'application/wasm' } : {}),
+      });
+    });
+  }
 });
 
 async function fixture(

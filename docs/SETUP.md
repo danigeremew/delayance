@@ -48,6 +48,11 @@ pnpm test:e2e
 
 Uses Playwright. Set `PLAYWRIGHT_API_URL` / `PLAYWRIGHT_BASE_URL` if ports differ. Set `PLAYWRIGHT_SKIP_UI=1` to skip the UI smoke test.
 
+For an isolated Wordcraft upgrade, pass `PLAYWRIGHT_WORDCRAFT_ASSETS_DIR` as an absolute staged
+asset directory in the shell when running `pnpm --filter @delayance/web test:e2e wordcraft.spec.ts`.
+This test-only override serves the candidate to the test browser without replacing the running
+app's editor. See [the upgrade workflow](../integrations/wordcraft/README.md#updating-upstream-safely).
+
 ## Services
 
 | Service            | URL                         |
@@ -128,7 +133,7 @@ When a document is already locked, Delayance opens the last saved copy read-only
 
 ### Wordcraft build
 
-Install Rust 1.95+, the `wasm32-unknown-unknown` target, and `wasm-bindgen-cli` 0.2.129, then run `pnpm wordcraft:build`. See [the integration guide](../integrations/wordcraft/README.md) for exact commands and the pinned source revision. The source checkout and compiled assets are ignored build inputs. Opening a document always uses Wordcraft.
+Install Rust 1.95+, the `wasm32-unknown-unknown` target, and `wasm-bindgen-cli` 0.2.129, then run `pnpm wordcraft:build`. See [the integration guide](../integrations/wordcraft/README.md) for exact commands and the pinned source revision. The clean upstream checkout, isolated `.wordcraft/` build snapshots, and compiled assets are ignored build inputs. Delayance customizations live in `integrations/wordcraft/`; preparation never modifies the upstream checkout. Pulling upstream does not change the pinned build. Use the integration guide’s candidate-build workflow before promoting updates. Opening a document always uses Wordcraft.
 
 `WORDCRAFT_BROWSER_URL` is the browser editor URL (default `http://localhost:48721/wordcraft/index.html`). `WORDCRAFT_WOPI_BASE_URL` must be browser-reachable (default `http://localhost:48722`).
 

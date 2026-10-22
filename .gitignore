@@ -12,7 +12,9 @@ apps/api/drizzle/meta/*
 .*
 !.prettierignore
 /vendor/wordcraft/
+/.wordcraft/
 /apps/web/public/wordcraft/
+/apps/web/public/wordcraft.previous/
 
 /storage/*
 !/storage/.gitkeep

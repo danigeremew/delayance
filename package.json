@@ -7,13 +7,14 @@
     "build": "turbo run build",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
-    "test": "turbo run test",
+    "test": "node --test scripts/wordcraft.test.mjs && turbo run test",
     "test:e2e": "pnpm --filter @delayance/web test:e2e",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\"",
     "reset:dev": "bash scripts/reset-dev.sh",
     "wordcraft:prepare": "node scripts/wordcraft.mjs prepare",
     "wordcraft:build": "node scripts/wordcraft.mjs build",
+    "wordcraft:test": "node --test scripts/wordcraft.test.mjs",
     "auth:password": "pnpm --filter @delayance/api auth:password"
   },
   "devDependencies": {

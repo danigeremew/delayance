@@ -1,25 +1,80 @@
 # Wordcraft editor integration
 
-This branch embeds the actual Rust/WASM editor from [storytold/wordcraft](https://github.com/storytold/wordcraft), pinned to `04f6f53b8a4d8140c7bb62f949b0a6099a473da1` (0.6.1). The clone is in `vendor/wordcraft`, excluded from the Delayance repository. Upstream is MIT OR Apache-2.0; retain its LICENSE-MIT, LICENSE-APACHE, NOTICE, and ATTRIBUTION.md when distributing the compiled editor.
+Delayance embeds the Rust/WASM editor from [storytold/wordcraft](https://github.com/storytold/wordcraft).
+The supported upstream commit is recorded in [`upstream.json`](./upstream.json) (currently
+`8e986366c7a5a261e058644a9446d4c73aa8a063`, 0.9.0). Upstream is MIT OR Apache-2.0;
+retain LICENSE-MIT, LICENSE-APACHE, NOTICE, and ATTRIBUTION.md when distributing the editor.
+
+## Source ownership and build isolation
+
+- `vendor/wordcraft`: clean upstream clone. Pull here normally; preparation never modifies its
+  files, branch or commits. The old customized checkout is preserved on its local `delayance` branch.
+- `integrations/wordcraft`: Delayance-owned bridge (`delayance.rs`), embedded UI (`embedded.rs`),
+  supported version (`upstream.json`), and minimal hook patch (`upstream.patch`). Edit these files.
+- `.wordcraft/<revision>-<integration-hash>/source`: generated snapshot with the overlay applied.
+  It is ignored and disposable. Do not edit it as source code.
+- `apps/web/public/wordcraft`: packaged browser assets, replaced only after a successful pinned build.
+
+Rust uses composition rather than class inheritance. Wordcraft does not yet expose every hook
+needed for Delayance's shared chrome and AI previews. The small hook patch is applied only to the
+build snapshot; upstream stays pristine. Pulls cannot conflict with our files, but upstream API
+changes can still require adapting the patch or bridge. See [the implementation plan](./UPGRADE_PLAN.md)
+and [upgrade verification](./VERIFICATION.md).
 
 ## Build and try
 
-Install Rust 1.95+ with the `wasm32-unknown-unknown` target and `wasm-bindgen-cli` 0.2.129 (matching the pinned Cargo.lock):
+Git and `tar` must be on PATH. Install Rust 1.95+ with the `wasm32-unknown-unknown` target
+and wasm-bindgen-cli 0.2.129:
 
 ```sh
 rustup target add wasm32-unknown-unknown
 cargo install wasm-bindgen-cli --version 0.2.129 --locked
-```
-
-Then, from the Delayance root:
-
-```sh
 pnpm wordcraft:prepare
 pnpm wordcraft:build
 pnpm dev
 ```
 
-`prepare` clones the pinned source if needed, applies `upstream.patch` idempotently, and copies `delayance.rs` into the browser app and `embedded.rs` into the UI crate. `workspace-v1.patch` and `legacy.patch` identify the earlier prepared checkouts so preparation can upgrade them without resetting unrelated changes. It refuses a different source revision. `build` compiles the real editor and copies the output into the ignored `apps/web/public/wordcraft` directory. Build outputs and the clone are not committed. Run the build again after modifying the bridge. These Rust files follow upstream's no-panic and origin-validation rules; the JavaScript host belongs to Delayance.
+`prepare` exports the pinned Git commit, checks the hook patch, and copies the two Rust modules
+only into a separate snapshot. Snapshot keys include the upstream commit and integration contents.
+The current upstream branch and any uncommitted edits are preserved; local edits are not build
+inputs. Preparation fails clearly on incompatible upstream. Rust compilation uses `--locked`.
+An unsuccessful prepare/build leaves the published editor untouched. `build.json` records its SHA.
+The default Cargo cache is `.wordcraft/target`; `CARGO_TARGET_DIR` and
+`WORDCRAFT_WASM_BINDGEN` remain supported. Build output and upstream sources are ignored.
+
+## Updating upstream safely
+
+```sh
+# Fetch and pull only the clean upstream branch (the backup delayance branch stays separate).
+git -C vendor/wordcraft switch main
+git -C vendor/wordcraft pull --ff-only
+
+# Test a candidate without changing the supported pin or the served editor.
+pnpm wordcraft:prepare --revision origin/main
+pnpm wordcraft:build --revision origin/main
+pnpm wordcraft:test
+```
+
+An explicit `--revision` builds candidate assets under the printed `.wordcraft/.../public/wordcraft`
+path and never publishes them, even when that revision equals the pin. If the patch fails, adapt
+`upstream.patch` against the new upstream in a disposable snapshot, then repeat. Never resolve a
+failure by discarding the authorization, preview, save or lock hooks.
+
+With the web server running, verify the real candidate using the existing browser suite:
+
+```sh
+PLAYWRIGHT_WORDCRAFT_ASSETS_DIR=/absolute/path/printed/by/build/public/wordcraft \
+  pnpm --filter @delayance/web test:e2e wordcraft.spec.ts
+```
+
+This override is confined to test browser routing; the running app's assets stay unchanged.
+After verification, set `revision` in `upstream.json` to the candidate's full commit SHA, update
+`wasmBindgenVersion` if Cargo.lock requires it, and run `pnpm wordcraft:build` and the repository
+checks. A normal build publishes the pinned revision. Commit the pin, bridge/patch changes and
+verification results together. Pulling upstream alone does not upgrade the running app.
+
+The old `workspace-v1.patch` and `legacy.patch` are retained as historical migration references;
+preparation no longer applies or reverses patches inside the upstream clone.
 
 Open a project document to use Wordcraft automatically. Wordcraft retains its native ribbon, pagination, document model, and DOCX importer/exporter. Embedded mode places the ribbon and status bar across Delayance’s workspace and removes the duplicate Wordcraft title bar. Delayance owns the shared document header and side panels. Use copies of representative documents for fidelity checks: upstream describes this release as alpha and documents import/export and layout gaps in `vendor/wordcraft/docs/gaps.md` and `ROADMAP.md`.
 

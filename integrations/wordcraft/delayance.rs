@@ -31,6 +31,25 @@ pub struct Bridge {
 }
 
 impl Bridge {
+    /// Compose the host save transport with upstream's browser services.
+    pub fn configure_services(&self, services: &mut wordcraft_ui_egui::Services) {
+        let downloads = self.downloads.clone();
+        let fallback = services.download.take();
+        services.download = Some(Box::new(move |name, bytes| {
+            if !name.to_ascii_lowercase().ends_with(".docx") {
+                return match &fallback {
+                    Some(download) => download(name, bytes),
+                    None => Err("Browser downloads unavailable".into()),
+                };
+            }
+            if !downloads.borrow().is_empty() {
+                return Err("A save is already queued".into());
+            }
+            downloads.borrow_mut().push((name.into(), bytes.to_vec()));
+            Ok(())
+        }));
+    }
+
     pub fn install(ctx: egui::Context) -> Result<Self, String> {
         let window = web_sys::window().ok_or("Browser window unavailable")?;
         let referrer = window.document().ok_or("Browser document unavailable")?.referrer();
