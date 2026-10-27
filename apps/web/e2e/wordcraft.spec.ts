@@ -379,6 +379,30 @@ test('rejects an outdated editor before acquiring a WOPI lock', async ({ page })
   await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeDisabled();
 });
 
+test('keeps the ribbon light when the operating system switches to dark mode', async ({ page }) => {
+  test.skip(!built, 'Run pnpm wordcraft:build to exercise the real Rust/WASM editor.');
+  await page.emulateMedia({ colorScheme: 'light' });
+  await fixture(page);
+  await expect.poll(() => page.evaluate(() => window.wordcraftTestLayout?.center.x)).toBe(380);
+  const frame = page.locator('iframe[title="Wordcraft"]');
+  const bounds = (await frame.boundingBox())!;
+  const layout = await page.evaluate(() => window.wordcraftTestLayout!);
+  const clip = { x: bounds.x, y: bounds.y, width: bounds.width, height: layout.top };
+  const toolbarHash = async () =>
+    createHash('sha256')
+      .update(await page.screenshot({ clip }))
+      .digest('hex');
+  await page.screenshot({ path: '../../output/playwright/toolbar-light-system.png' });
+  const light = await toolbarHash();
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await page.screenshot({ path: '../../output/playwright/toolbar-dark-system.png' });
+  await expect.poll(toolbarHash).toBe(light);
+  await page.reload();
+  await expect.poll(() => page.evaluate(() => window.wordcraftTestLayout?.center.x)).toBe(380);
+  await expect.poll(toolbarHash).toBe(light);
+  await page.screenshot({ path: '../../output/playwright/toolbar-dark-system.png' });
+});
+
 test('real integrated chrome preserves the editor across resizing and layers File/search above panels', async ({
   page,
 }) => {

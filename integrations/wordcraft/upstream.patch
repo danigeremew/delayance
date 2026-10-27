@@ -125,6 +125,14 @@ index 5dede36..fc1cd21 100644
 +        }
          // A pending Change Picture only survives until the next action (#147).
          if !matches!(id, "ui.changePicture" | "picture.change" | "insert.picture") {
+@@ -2130,3 +2130,7 @@ impl WordApp {
++        // Embedded Delayance ignores OS appearance and saved Wordcraft theme preferences.
++        if self.embedded.is_some() {
++            self.ui.theme = theme::Appearance::Light;
++        }
+         let effective = match self.ui.theme {
+             theme::Appearance::System if ctx.system_theme().is_none() => match self.desktop_dark {
+                 Some(true) => theme::Appearance::Dark,
 @@ -2366,4 +2375,7 @@ impl WordApp {
              return;
          }
@@ -178,3 +186,29 @@ index 4afd0bb..4c95454 100644
 +            .unwrap_or_else(|| if ctx.global_style().visuals.dark_mode { Tokens::dark() } else { Tokens::light() })
      }
  }
+@@ -781,3 +782,3 @@
+-fn visuals(t: &Tokens) -> Visuals {
++pub(crate) fn visuals(t: &Tokens) -> Visuals {
+     let mut v = if t.dark { Visuals::dark() } else { Visuals::light() };
+     v.panel_fill = t.ribbon;
+diff --git a/crates/ui-egui/src/ribbon.rs b/crates/ui-egui/src/ribbon.rs
+--- a/crates/ui-egui/src/ribbon.rs
++++ b/crates/ui-egui/src/ribbon.rs
+@@ -409,7 +409,7 @@
+                             if cut {
+                                 let mut job = egui::text::LayoutJob::single_section(
+                                     shown.to_string(),
+-                                    egui::text::TextFormat::simple(if active { semibold(12.5) } else { medium(12.5) }, color),
++                                    egui::text::TextFormat::simple(if app.embedded.is_some() { crate::embedded::tab_font(active, 12.5) } else if active { semibold(12.5) } else { medium(12.5) }, color),
+                                 );
+                                 job.wrap = egui::text::TextWrapping {
+                                     max_width: (w - plan.pad).max(1.0),
+@@ -424,7 +424,7 @@
+                                     r.center(),
+                                     Align2::CENTER_CENTER,
+                                     shown,
+-                                    if active { semibold(12.5) } else { medium(12.5) },
++                                    if app.embedded.is_some() { crate::embedded::tab_font(active, 12.5) } else if active { semibold(12.5) } else { medium(12.5) },
+                                     color,
+                                 );
+                             }

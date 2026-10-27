@@ -56,7 +56,7 @@ impl HostTheme {
         tokens.panel = panel;
         tokens.menu = panel;
         tokens.text = text;
-        tokens.icon = text;
+        tokens.icon = muted;
         tokens.text_dim = muted;
         tokens.group_label = muted;
         tokens.border = border;
@@ -65,6 +65,7 @@ impl HostTheme {
         tokens.checked = accent.gamma_multiply(0.15);
         ctx.data_mut(|data| data.insert_temp(egui::Id::new("host_theme"), tokens));
         ctx.global_style_mut(|style| {
+            style.visuals = crate::theme::visuals(&tokens);
             style.visuals.override_text_color = Some(text);
             style.visuals.panel_fill = panel;
             style.visuals.window_fill = panel;
@@ -72,6 +73,11 @@ impl HostTheme {
             style.visuals.window_stroke.color = border;
         });
     }
+}
+
+/// Embedded navigation uses the host's lighter text hierarchy.
+pub fn tab_font(active: bool, size: f32) -> egui::FontId {
+    if active { crate::theme::medium(size) } else { crate::theme::regular(size) }
 }
 
 pub struct Preview {
@@ -272,6 +278,31 @@ pub fn finish(app: &mut WordApp, ui: &Ui) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn embedded_appearance_stays_light_when_system_or_preferences_are_dark() {
+        for preference in [crate::theme::Appearance::System, crate::theme::Appearance::Dark] {
+            let mut app = WordApp::new(wordcraft_engine::Session::new(wordcraft_doc::Document::from_text("Theme fixture")), Default::default());
+            app.ui.theme = preference;
+            let layout = HostLayout::parse(json!({"left":0,"right":0,"theme":{"background":"#f7f7f5","panel":"#ffffff","text":"#1a1a1a","muted":"#6b6b6b","border":"#e2e2de","accent":"#2c5f4a"}})).unwrap();
+            app.embedded = Some(Embedded { host: Some(layout), ..Default::default() });
+            let ctx = egui::Context::default();
+            for system_theme in [egui::Theme::Dark, egui::Theme::Light, egui::Theme::Dark] {
+                let input = egui::RawInput { system_theme: Some(system_theme), ..Default::default() };
+                let output = ctx.run_ui(input, |ui| {
+                    app.logic(ui.ctx());
+                    app.embedded.as_ref().unwrap().host.as_ref().unwrap().theme.install(ui.ctx());
+                    let style = ui.ctx().global_style();
+                    assert!(!style.visuals.dark_mode);
+                    assert_eq!(style.visuals.widgets.inactive.bg_fill, Color32::WHITE);
+                    assert_eq!(style.visuals.extreme_bg_color, Color32::WHITE);
+                });
+                output.drop_without_applying_deltas();
+                assert_eq!(app.ui.theme, crate::theme::Appearance::Light);
+            }
+        }
+        assert_eq!(tab_font(false, 12.5), crate::theme::regular(12.5));
+    }
+
     #[test]
     fn coordinates_account_for_interface_scale_and_screen_origin() {
         let screen = Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(500.0, 400.0));

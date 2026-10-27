@@ -2,6 +2,7 @@
 @import '@delayance/design-system/tokens.css';
 
 html {
+  color-scheme: light;
   font-size: 16px;
 }
 

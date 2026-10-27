@@ -98,7 +98,7 @@ The origin-checked `Frame_Ready` handshake advertises `embeddedLayout: 1`. The h
 
 After layout, `Delayance_Layout` reports actual chrome heights, center bounds, visible native overlay rectangles, modal/File blocking state, write permission, and undo/redo availability. The host validates the message and uses an SVG union clip on the persistent iframe. React sidebars sit beneath the clip cutouts; native menus, dialogs and File views remain above them. Host pointer events dismiss native popups. Layout changes never recreate the editor or WOPI session.
 
-Stored sidebar widths remain unchanged. If both panels leave less than 480 CSS pixels for writing, the assistant temporarily collapses, followed by the tools panel if necessary; widening restores them. On windows narrower than 480 pixels, the canvas uses the available width. The embedded theme follows Delayance; standalone Wordcraft retains its own chrome and theme.
+Stored sidebar widths remain unchanged. If both panels leave less than 480 CSS pixels for writing, the assistant temporarily collapses, followed by the tools panel if necessary; widening restores them. On windows narrower than 480 pixels, the canvas uses the available width. The embedded editor always uses Delayance’s light theme, including native controls and lighter ribbon tabs, regardless of the operating system or saved Wordcraft theme. Standalone Wordcraft retains its own chrome and theme.
 
 ## Lock lifecycle and conflicting editors
 

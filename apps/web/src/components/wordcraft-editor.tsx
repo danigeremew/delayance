@@ -409,6 +409,7 @@ export function WordcraftEditor({
         title="Wordcraft"
         className="pointer-events-auto absolute inset-0 h-full w-full border-0"
         style={{
+          colorScheme: 'light',
           clipPath: `url(#${clipId})`,
           visibility: !loaded || !layout ? 'hidden' : undefined,
         }}
