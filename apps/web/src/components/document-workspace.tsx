@@ -13,6 +13,7 @@ import { AiPanel } from '@/components/ai-panel';
 import { SidebarResizeHandle } from '@/components/sidebar-resize-handle';
 import { DocumentsList, LeftSidebarShell } from '@/components/left-sidebar';
 import { WordcraftEditor } from '@/components/wordcraft-editor';
+import { EDITOR_CHROME_INSETS } from '@/components/editor-loading-shell';
 import { OfficeOutlinePanel } from '@/components/office-outline-panel';
 import { fitWorkspacePanels, type WordcraftLayout } from '@/editor/workspace-layout';
 import type { EditorAdapter, EditorCommand, EditorSaveState } from '@/editor/adapter';
@@ -38,7 +39,7 @@ export function DocumentWorkspace() {
     value: WordcraftLayout | null;
   } | null>(null);
   const layout = layoutState?.documentId === documentId ? layoutState.value : null;
-  const [chromeInsets, setChromeInsets] = useState({ top: 0, bottom: 0 });
+  const [chromeInsets, setChromeInsets] = useState(EDITOR_CHROME_INSETS);
   const setLayout = useCallback(
     (value: WordcraftLayout | null) => {
       setLayoutState({ documentId, value });

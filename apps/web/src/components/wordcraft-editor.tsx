@@ -11,6 +11,7 @@ import {
   wordcraftLayoutSchema,
 } from '@delayance/validation';
 import { apiFetch } from '@/lib/api';
+import { EditorLoadingShell } from '@/components/editor-loading-shell';
 import { EditorLockConflictError, releaseEditorLock } from '@/editor/editor-lock';
 import { WordcraftEditorAdapter } from '@/editor/wordcraft-adapter';
 import { editorRegions, type WordcraftLayout } from '@/editor/workspace-layout';
@@ -184,9 +185,26 @@ export function WordcraftEditor({
     onAdapter(adapter);
     const post = (MessageId: string, Values: Record<string, unknown>) =>
       frame.current?.contentWindow?.postMessage(JSON.stringify({ MessageId, Values }), origin);
+    const readContents = async () => {
+      const file = await fetchWopi(contentsUrl);
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      if (!bytes.length || bytes.length > 100 * 1024 * 1024) throw new Error('Invalid DOCX size.');
+      return bytes;
+    };
+    const prepareDocument = async () => {
+      const info = wordcraftWopiInfoSchema.parse(await (await fetchWopi(wopiUrl)).json());
+      return { version: info.Version, bytes: await readContents() };
+    };
+    // Read ahead while WASM starts, but wait for the validated editor handshake before locking.
+    let preparedDocument: ReturnType<typeof prepareDocument> | undefined;
+    const prepare = () => (preparedDocument ??= prepareDocument());
     const load = async () => {
       if (loading) return;
       loading = true;
+      const prepared = await prepare();
+      if (!active || suspended) return;
+      let bytes = prepared.bytes;
+      version = prepared.version;
       if (writable) {
         try {
           await lockFile('LOCK');
@@ -195,14 +213,12 @@ export function WordcraftEditor({
           writable = false;
           if (active) onLockConflict(true);
         }
+        // A save during startup must not leave the editor working from a stale prefetched file.
+        const info = wordcraftWopiInfoSchema.parse(await (await fetchWopi(wopiUrl)).json());
+        if (info.Version !== version) bytes = await readContents();
+        version = info.Version;
       }
-      const response = await fetchWopi(wopiUrl);
-      const info = wordcraftWopiInfoSchema.parse(await response.json());
-      version = info.Version;
-      const file = await fetchWopi(contentsUrl);
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      if (!bytes.length || bytes.length > 100 * 1024 * 1024) throw new Error('Invalid DOCX size.');
-      if (active)
+      if (active && !suspended)
         frame.current?.contentWindow?.postMessage(
           { MessageId: 'Delayance_LoadDocument', bytes, writable },
           origin,
@@ -305,6 +321,7 @@ export function WordcraftEditor({
       suspended = false;
       if (!documentLoaded.current) {
         loading = false;
+        preparedDocument = undefined;
         setError(null);
         post('Host_PostmessageReady', {});
       } else if (writable) {
@@ -346,7 +363,10 @@ export function WordcraftEditor({
       .then((response) => {
         if (!response.ok)
           throw new Error('Wordcraft is not built. Run pnpm wordcraft:build, then reopen it.');
-        if (active && frame.current) frame.current.src = url.toString();
+        if (active && frame.current) {
+          void prepare().catch(report);
+          frame.current.src = url.toString();
+        }
       })
       .catch(report);
     return () => {
@@ -395,15 +415,7 @@ export function WordcraftEditor({
           {error}
         </div>
       ) : null}
-      {!loaded && !error ? (
-        <div
-          role="status"
-          style={loadingInsets}
-          className="pointer-events-auto absolute inset-0 z-30 flex items-center justify-center bg-[var(--dl-bg)] text-sm text-[var(--dl-muted)]"
-        >
-          Loading Wordcraft…
-        </div>
-      ) : null}
+      {(!loaded || !layout) && !error ? <EditorLoadingShell insets={loadingInsets} /> : null}
       <iframe
         ref={frame}
         title="Wordcraft"

@@ -379,10 +379,69 @@ test('rejects an outdated editor before acquiring a WOPI lock', async ({ page })
   await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeDisabled();
 });
 
+test('prefetches during editor startup and rechecks the saved version before opening', async ({
+  page,
+}) => {
+  test.skip(!built, 'Run pnpm wordcraft:build to exercise the real Rust/WASM editor.');
+  let releaseWasm: () => void = () => {};
+  const wasmGate = new Promise<void>((resolve) => {
+    releaseWasm = resolve;
+  });
+  let initialBytes: Buffer | undefined;
+  page.on('requestfinished', async (request) => {
+    if (
+      request.method() === 'GET' &&
+      new URL(request.url()).pathname === `/wopi/files/${documentId}/contents`
+    )
+      initialBytes = await (await request.response())?.body();
+  });
+  await page.route('**/wordcraft/wordcraft_bg.wasm', async (route) => {
+    await wasmGate;
+    await route.fallback();
+  });
+  const opening = fixture(page);
+  try {
+    await expect.poll(() => initialBytes !== undefined).toBe(true);
+    await expect(page.getByText('Loading Wordcraft…', { exact: true })).toBeVisible();
+    const shell = page.getByTestId('editor-loading-shell');
+    await expect(shell).toBeVisible();
+    await expect(shell.getByRole('button', { name: 'Home', exact: true })).toBeDisabled();
+    await expect(shell.getByLabel('Font', { exact: true })).toBeDisabled();
+    await expect(shell.locator('.dl-editor-startup-page')).toBeVisible();
+    await page.screenshot({ path: '../../output/playwright/editor-startup-shell.png' });
+    const updated = await JSZip.loadAsync(initialBytes!);
+    const xml = await updated.file('word/document.xml')!.async('string');
+    updated.file('word/document.xml', xml.replace('Original text', 'Latest saved text'));
+    const bytes = await updated.generateAsync({ type: 'nodebuffer' });
+    await page.route(`${API}/wopi/files/${documentId}*`, (route) => {
+      if (route.request().method() !== 'GET') return route.fallback();
+      return route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ Version: `2:${createHash('sha256').update(bytes).digest('hex')}` }),
+      });
+    });
+    await page.route(`${API}/wopi/files/${documentId}/contents*`, (route) =>
+      route.fulfill({ contentType: 'application/octet-stream', body: bytes }),
+    );
+  } finally {
+    releaseWasm();
+    await opening;
+  }
+  await expect(page.getByText('Loading Wordcraft…', { exact: true })).toHaveCount(0, {
+    timeout: 90000,
+  });
+  expect((await command(page, 'command', { command: 'select.all' })).ok).toBe(true);
+  expect((await command(page, 'selection')).result?.text).toBe('Latest saved text');
+  await expect(page.getByTestId('editor-loading-shell')).toHaveCount(0);
+});
+
 test('keeps the ribbon light when the operating system switches to dark mode', async ({ page }) => {
   test.skip(!built, 'Run pnpm wordcraft:build to exercise the real Rust/WASM editor.');
   await page.emulateMedia({ colorScheme: 'light' });
   await fixture(page);
+  await expect(page.getByText('Loading Wordcraft…', { exact: true })).toHaveCount(0, {
+    timeout: 90000,
+  });
   await expect.poll(() => page.evaluate(() => window.wordcraftTestLayout?.center.x)).toBe(380);
   const frame = page.locator('iframe[title="Wordcraft"]');
   const bounds = (await frame.boundingBox())!;
@@ -398,6 +457,9 @@ test('keeps the ribbon light when the operating system switches to dark mode', a
   await page.screenshot({ path: '../../output/playwright/toolbar-dark-system.png' });
   await expect.poll(toolbarHash).toBe(light);
   await page.reload();
+  await expect(page.getByText('Loading Wordcraft…', { exact: true })).toHaveCount(0, {
+    timeout: 90000,
+  });
   await expect.poll(() => page.evaluate(() => window.wordcraftTestLayout?.center.x)).toBe(380);
   await expect.poll(toolbarHash).toBe(light);
   await page.screenshot({ path: '../../output/playwright/toolbar-dark-system.png' });

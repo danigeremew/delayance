@@ -1,0 +1,177 @@
+.dl-editor-startup {
+  position: absolute;
+  inset: 0;
+  color: var(--dl-muted);
+  font-size: 12px;
+  pointer-events: none;
+}
+
+.dl-editor-startup-ribbon {
+  position: absolute;
+  inset: 0 0 auto;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-bottom: 1px solid var(--dl-border);
+  background: var(--dl-panel);
+}
+
+.dl-editor-startup button,
+.dl-editor-startup select {
+  color: inherit;
+  font: inherit;
+  font-weight: 400;
+  opacity: 1;
+}
+
+.dl-editor-startup button {
+  border: 0;
+  background: transparent;
+  padding: 3px 6px;
+  white-space: nowrap;
+}
+
+.dl-editor-startup-tabs {
+  display: flex;
+  height: 30px;
+  gap: 6px;
+  padding: 0 10px;
+  overflow: hidden;
+  border-bottom: 1px solid var(--dl-border);
+  background: var(--dl-bg);
+}
+
+.dl-editor-startup-tabs .is-active {
+  color: var(--dl-accent);
+  border-bottom: 3px solid var(--dl-accent);
+}
+
+.dl-editor-startup-groups {
+  display: flex;
+  gap: 8px;
+  height: calc(100% - 30px);
+  padding: 5px 10px;
+  overflow: hidden;
+}
+
+.dl-editor-startup-group {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  flex-shrink: 0;
+  min-width: 80px;
+  height: 100%;
+  padding: 0 12px 18px 0;
+  border-right: 1px solid var(--dl-border);
+}
+
+.dl-editor-startup-group > div:not(.dl-editor-startup-row) > button {
+  display: block;
+  padding-block: 1px;
+}
+
+.dl-editor-startup-group small {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 12px;
+  text-align: center;
+  font-size: 11px;
+}
+
+.dl-editor-startup-paste {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.dl-editor-startup-font {
+  display: block;
+}
+
+.dl-editor-startup-row {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.dl-editor-startup-row select {
+  width: 130px;
+  height: 23px;
+  border: 1px solid var(--dl-border);
+  border-radius: 3px;
+  background: var(--dl-panel);
+}
+
+.dl-editor-startup-row select + select {
+  width: 56px;
+}
+
+.dl-editor-startup-styles button {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  height: 58px;
+  min-width: 76px;
+  font-size: 10px;
+}
+
+.dl-editor-startup-styles span {
+  font-size: 12px;
+}
+
+.dl-editor-startup-canvas {
+  position: absolute;
+  overflow: hidden;
+  background: #e6e6e6;
+}
+
+.dl-editor-startup-ruler {
+  height: 18px;
+  margin: 0 20px 20px;
+  border-bottom: 1px solid var(--dl-border);
+  background: repeating-linear-gradient(to right, transparent 0 15px, #b9b9b9 15px 16px) bottom /
+    100% 5px no-repeat;
+}
+
+.dl-editor-startup-page {
+  width: min(794px, calc(100% - 40px));
+  min-height: 100%;
+  aspect-ratio: 210 / 297;
+  margin: 0 auto;
+  padding: 40px clamp(16px, 8%, 80px);
+  border: 1px solid #ddd;
+  background: white;
+  box-shadow: 0 1px 5px #0000000a;
+}
+
+.dl-editor-startup-status {
+  text-align: center;
+  font-size: 12px;
+}
+
+.dl-editor-startup-lines {
+  display: grid;
+  gap: 12px;
+  margin-top: 36px;
+}
+
+.dl-editor-startup-lines i {
+  height: 7px;
+  border-radius: 3px;
+  background: #f1f2f1;
+}
+
+.dl-editor-startup-lines i:last-child {
+  width: 65%;
+}
+
+.dl-editor-startup-statusbar {
+  position: absolute;
+  inset: auto 0 0;
+  background: var(--dl-bg);
+  border-top: 1px solid var(--dl-border);
+}
